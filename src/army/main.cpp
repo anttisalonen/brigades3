@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 #include <map>
+#include <random>
 
 #include <string.h>
 #include <assert.h>
@@ -45,6 +46,9 @@ class WorldMap {
 
 	private:
 		Scene::Scene& mScene;
+		std::vector<Common::Vector3> mTrees;
+
+		std::default_random_engine mGen;
 };
 
 WorldMap::WorldMap(Scene::Scene& scene)
@@ -58,6 +62,21 @@ void WorldMap::create()
 	mScene.addModelFromHeightmap("Terrain", hm);
 	auto mi = mScene.addMeshInstance("Terrain", "Terrain", "Snow");
 	mi->setPosition(Common::Vector3(hm.getWidth() * 0.5f, 0.0f, hm.getWidth() * 0.5f));
+
+	std::uniform_real_distribution<double> treeDis(0.0, hm.getWidth());
+	for(int i = 0; i < 500; i++) {
+		float x = treeDis(mGen);
+		float y = treeDis(mGen);
+
+		auto pos = Common::Vector3(x, getHeightAt(x, y), y);
+		mTrees.push_back(pos);
+
+		char name[256];
+		snprintf(name, 255, "Tree%d", i);
+
+		auto treeInst = mScene.addMeshInstance(name, "Tree", "Snow");
+		treeInst->setPosition(pos);
+	}
 }
 
 float WorldMap::getHeightAt(float x, float y) const
@@ -117,7 +136,7 @@ InputComponent::InputComponent(PhysicsComponent& phys)
 
 void InputComponent::update(float dt)
 {
-	mPhys.addAcceleration(Common::Vector3(1.0f, 0.0f, 0.0f));
+	mPhys.addAcceleration(Common::Vector3(1.0f, 0.0f, 1.0f));
 }
 
 class RenderComponent {
@@ -242,6 +261,7 @@ AppDriver::AppDriver()
 	mWorld(mScene)
 {
 	mScene.addModel("Cube", "share/textured-cube.obj");
+	mScene.addModel("Tree", "share/tree.obj");
 	mScene.addTexture("Snow", "share/snow.jpg");
 
 	mCamera.setPosition(Common::Vector3(1.9f, 1.9f, 4.2f));
