@@ -10,6 +10,7 @@
 
 #include <sscene/Scene.h>
 
+#include <common/Clock.h>
 #include <common/Math.h>
 #include <common/DriverFramework.h>
 
@@ -84,14 +85,55 @@ float WorldMap::getHeightAt(float x, float y) const
 	return 3.0f * sin(x * 0.20f) + 5.0f * cos(y * 0.10f) - 8.0f;
 }
 
+class Weapon {
+	public:
+		Weapon();
+		void update(float dt);
+		bool canShoot() const;
+		void shoot();
+
+	private:
+		Common::Countdown mTimer;
+		unsigned int mBullets;
+};
+
+Weapon::Weapon()
+	: mTimer(0.5f),
+	mBullets(10)
+{
+}
+
+void Weapon::update(float dt)
+{
+	mTimer.doCountdown(dt);
+	mTimer.check();
+}
+
+bool Weapon::canShoot() const
+{
+	return !mTimer.running() && mBullets;
+}
+
+void Weapon::shoot()
+{
+	assert(canShoot());
+	mTimer.rewind();
+	if(mBullets > 0)
+		mBullets--;
+}
+
 class PhysicsComponent {
 	public:
-		PhysicsComponent(WorldMap& wmap);
+		PhysicsComponent(WorldMap& wmap, float maxvel, float velfriction);
 		void update(float dt);
 		void addAcceleration(const Common::Vector3& vec);
 		const Common::Vector3& getPosition() const { return mPosition; }
 		const Common::Quaternion& getOrientation() const { return mOrientation; }
 		void rotate(float yaw, float pitch);
+
+		void setPosition(const Common::Vector3& pos) { mPosition = pos; }
+		void setOrientation(const Common::Quaternion& ori) { mOrientation = ori; }
+		void setVelocity(const Common::Vector3& v) { mVelocity = v; }
 
 	private:
 		Common::Vector3 mPosition;
@@ -99,24 +141,31 @@ class PhysicsComponent {
 		Common::Vector3 mAcceleration;
 		Common::Quaternion mOrientation;
 		WorldMap& mMap;
+		float mMaxVel;
+		float mVelFriction;
 };
 
-PhysicsComponent::PhysicsComponent(WorldMap& wmap)
-	: mMap(wmap)
+PhysicsComponent::PhysicsComponent(WorldMap& wmap, float maxvel, float velfriction)
+	: mMap(wmap),
+	mMaxVel(maxvel),
+	mVelFriction(velfriction)
 {
 }
 
 void PhysicsComponent::update(float dt)
 {
+	mAcceleration.y -= 10.0f;
 	mVelocity += mAcceleration * dt;
-	mVelocity.truncate(5.0f);
+	if(mMaxVel) {
+		mVelocity.truncate(mMaxVel);
+	}
 
-	if(dt) {
-		mVelocity = mVelocity * 0.95f;
+	if(dt && mVelFriction) {
+		mVelocity = mVelocity * mVelFriction;
 	}
 
 	mPosition += mVelocity * dt;
-	mPosition.y = mMap.getHeightAt(mPosition.x, mPosition.z);
+	mPosition.y = std::max(mPosition.y, mMap.getHeightAt(mPosition.x, mPosition.z));
 
 	mAcceleration = Common::Vector3();
 }
@@ -133,22 +182,88 @@ void PhysicsComponent::rotate(float yaw, float pitch)
 		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), yaw);
 }
 
+class Bullets {
+	public:
+		Bullets(WorldMap& wmap);
+		void shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Quaternion& ori);
+		void update(float dt);
+
+	private:
+		std::vector<PhysicsComponent> mPhysics;
+		WorldMap& mMap;
+};
+
+Bullets::Bullets(WorldMap& wmap)
+	: mMap(wmap)
+{
+}
+
+void Bullets::update(float dt)
+{
+	for(unsigned int i = 0; i < mPhysics.size(); i++) {
+		mPhysics[i].update(dt);
+	}
+}
+
+void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Quaternion& ori)
+{
+	PhysicsComponent ph(mMap, 0.0f, 0.0f);
+	ph.setPosition(pos);
+	ph.setOrientation(ori);
+	ph.setVelocity(Common::Math::rotate3D(Scene::WorldForward, ori) * 100.0f);
+	mPhysics.push_back(ph);
+	weapon.shoot();
+}
+
+class ShooterComponent {
+	public:
+		ShooterComponent(PhysicsComponent& phys, Bullets& bullets);
+		void shoot();
+		void update(float dt);
+
+	private:
+		PhysicsComponent& mPhys;
+		Bullets& mBullets;
+		Weapon mWeapon;
+};
+
+ShooterComponent::ShooterComponent(PhysicsComponent& phys, Bullets& bullets)
+	: mPhys(phys),
+	mBullets(bullets)
+{
+}
+
+void ShooterComponent::shoot()
+{
+	if(mWeapon.canShoot()) {
+		mBullets.shoot(mWeapon, mPhys.getPosition(), mPhys.getOrientation());
+	}
+}
+
+void ShooterComponent::update(float dt)
+{
+	mWeapon.update(dt);
+}
+
 class InputComponent {
 	public:
-		InputComponent(PhysicsComponent& phys, bool player);
+		InputComponent(PhysicsComponent& phys, ShooterComponent& shooter, bool player);
 		void update(float dt);
 		bool handleKeyDown(float frameTime, SDLKey key);
 		bool handleKeyUp(float frameTime, SDLKey key);
 		bool handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev);
+		bool handleMousePress(float frameTime, Uint8 button);
 
 	private:
 		PhysicsComponent& mPhys;
+		ShooterComponent& mShooter;
 		bool mPlayer;
 		Common::Vector3 mInputAccel;
 };
 
-InputComponent::InputComponent(PhysicsComponent& phys, bool player)
+InputComponent::InputComponent(PhysicsComponent& phys, ShooterComponent& shooter, bool player)
 	: mPhys(phys),
+	mShooter(shooter),
 	mPlayer(player)
 {
 }
@@ -231,6 +346,14 @@ bool InputComponent::handleMouseMotion(float frameTime, const SDL_MouseMotionEve
 	return false;
 }
 
+bool InputComponent::handleMousePress(float frameTime, Uint8 button)
+{
+	if(button == SDL_BUTTON_LEFT) {
+		mShooter.shoot();
+	}
+	return false;
+}
+
 class RenderComponent {
 	public:
 		RenderComponent(Scene::Scene& scene, const PhysicsComponent& phys, unsigned int num);
@@ -258,7 +381,7 @@ class Soldiers {
 	public:
 		Soldiers(Scene::Scene& scene);
 		void update(float dt);
-		void addSoldiers(WorldMap& wmap);
+		void addSoldiers(WorldMap& wmap, Bullets& bullets);
 		const Common::Vector3& getPlayerSoldierPosition() const;
 		const Common::Quaternion& getPlayerSoldierOrientation() const;
 		InputComponent& getPlayerInputComponent();
@@ -268,6 +391,7 @@ class Soldiers {
 		std::vector<InputComponent> mInputs;
 		std::vector<PhysicsComponent> mPhysics;
 		std::vector<RenderComponent> mRenders;
+		std::vector<ShooterComponent> mShooters;
 
 		Scene::Scene& mScene;
 		unsigned int mPlayerSoldierIndex;
@@ -289,18 +413,25 @@ void Soldiers::update(float dt)
 		mPhysics[i].update(dt);
 	}
 	for(unsigned int i = 0; i < mNumSoldiers; i++) {
+		mShooters[i].update(dt);
+	}
+	for(unsigned int i = 0; i < mNumSoldiers; i++) {
 		mRenders[i].update(dt);
 	}
 }
 
-void Soldiers::addSoldiers(WorldMap& wmap)
+void Soldiers::addSoldiers(WorldMap& wmap, Bullets& bullets)
 {
 	for(int i = 0; i < 10; i++) {
-		mPhysics.emplace_back(wmap);
+		mPhysics.emplace_back(wmap, 5.0f, 0.95f);
 	}
 
 	for(int i = 0; i < 10; i++) {
-		mInputs.emplace_back(mPhysics[i], i == 0);
+		mShooters.emplace_back(mPhysics[i], bullets);
+	}
+
+	for(int i = 0; i < 10; i++) {
+		mInputs.emplace_back(mPhysics[i], mShooters[i], i == 0);
 	}
 
 	for(int i = 0; i < 10; i++) {
@@ -342,23 +473,26 @@ class World {
 		bool handleKeyDown(float frameTime, SDLKey key);
 		bool handleKeyUp(float frameTime, SDLKey key);
 		bool handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev);
+		bool handleMousePress(float frameTime, Uint8 button);
 
 	private:
 		WorldMap mMap;
 		Soldiers mSoldiers;
+		Bullets mBullets;
 		Scene::Scene& mScene;
 };
 
 World::World(Scene::Scene& scene)
 	: mMap(scene),
 	mSoldiers(scene),
+	mBullets(mMap),
 	mScene(scene)
 {
 }
 
 void World::addSoldiers()
 {
-	mSoldiers.addSoldiers(mMap);
+	mSoldiers.addSoldiers(mMap, mBullets);
 }
 
 void World::createMap()
@@ -369,6 +503,7 @@ void World::createMap()
 void World::update(float dt)
 {
 	mSoldiers.update(dt);
+	mBullets.update(dt);
 
 	auto& cam = mScene.getDefaultCamera();
 	cam.setPosition(mSoldiers.getPlayerSoldierPosition() + Common::Vector3(0.0f, 1.0f, 0.0f));
@@ -394,6 +529,11 @@ bool World::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev)
 	return mSoldiers.getPlayerInputComponent().handleMouseMotion(frameTime, ev);
 }
 
+bool World::handleMousePress(float frameTime, Uint8 button)
+{
+	return mSoldiers.getPlayerInputComponent().handleMousePress(frameTime, button);
+}
+
 class AppDriver : public Common::Driver {
 	public:
 		AppDriver();
@@ -401,6 +541,7 @@ class AppDriver : public Common::Driver {
 		virtual bool handleKeyDown(float frameTime, SDLKey key) override;
 		virtual bool handleKeyUp(float frameTime, SDLKey key) override;
 		virtual bool handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev) override;
+		virtual bool handleMousePress(float frameTime, Uint8 button) override;
 		virtual bool prerenderUpdate(float frameTime) override;
 
 	private:
@@ -486,6 +627,15 @@ bool AppDriver::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& e
 		}
 	} else {
 		return mWorld.handleMouseMotion(frameTime, ev);
+	}
+
+	return false;
+}
+
+bool AppDriver::handleMousePress(float frameTime, Uint8 button)
+{
+	if(!mObserverMode) {
+		return mWorld.handleMousePress(frameTime, button);
 	}
 
 	return false;
