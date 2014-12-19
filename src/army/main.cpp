@@ -124,7 +124,8 @@ void Weapon::shoot()
 
 class PhysicsComponent {
 	public:
-		PhysicsComponent(WorldMap& wmap, float maxvel, float velfriction);
+		PhysicsComponent() = default;
+		PhysicsComponent(const WorldMap* wmap, float maxvel, float velfriction);
 		void update(float dt);
 		void addAcceleration(const Common::Vector3& vec);
 		const Common::Vector3& getPosition() const { return mPosition; }
@@ -140,12 +141,12 @@ class PhysicsComponent {
 		Common::Vector3 mVelocity;
 		Common::Vector3 mAcceleration;
 		Common::Quaternion mOrientation;
-		WorldMap& mMap;
+		const WorldMap* mMap;
 		float mMaxVel;
 		float mVelFriction;
 };
 
-PhysicsComponent::PhysicsComponent(WorldMap& wmap, float maxvel, float velfriction)
+PhysicsComponent::PhysicsComponent(const WorldMap* wmap, float maxvel, float velfriction)
 	: mMap(wmap),
 	mMaxVel(maxvel),
 	mVelFriction(velfriction)
@@ -165,7 +166,7 @@ void PhysicsComponent::update(float dt)
 	}
 
 	mPosition += mVelocity * dt;
-	mPosition.y = std::max(mPosition.y, mMap.getHeightAt(mPosition.x, mPosition.z));
+	mPosition.y = std::max(mPosition.y, mMap->getHeightAt(mPosition.x, mPosition.z));
 
 	mAcceleration = Common::Vector3();
 }
@@ -182,52 +183,157 @@ void PhysicsComponent::rotate(float yaw, float pitch)
 		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), yaw);
 }
 
-class Bullets {
+struct Ray {
+	Common::Vector3 start;
+	Common::Vector3 end;
+};
+
+class HittableComponent {
 	public:
-		Bullets(WorldMap& wmap);
+		HittableComponent() = default;
+		HittableComponent(const PhysicsComponent* phys, float radius);
+		bool hit(const Ray& ray) const;
+		void die();
+		bool hasDied() const;
+
+	private:
+		const PhysicsComponent* mPhys;
+		float mRadius;
+		bool mDied;
+};
+
+HittableComponent::HittableComponent(const PhysicsComponent* phys, float radius)
+	: mPhys(phys),
+	mRadius(radius),
+	mDied(false)
+{
+}
+
+bool HittableComponent::hit(const Ray& ray) const
+{
+	return Common::Math::raySphereIntersect(ray.start, ray.end, mPhys->getPosition(), mRadius);
+}
+
+void HittableComponent::die()
+{
+	mDied = true;
+}
+
+bool HittableComponent::hasDied() const
+{
+	return mDied;
+}
+
+class HitterComponent {
+	public:
+		HitterComponent() = default;
+		HitterComponent(const PhysicsComponent* phys);
+		void update(float dt);
+		Ray getLastRay() const;
+
+	private:
+		const PhysicsComponent* mPhys;
+		Common::Vector3 mPrevPos;
+		Common::Vector3 mThisPos;
+};
+
+HitterComponent::HitterComponent(const PhysicsComponent* phys)
+	: mPhys(phys)
+{
+	mPrevPos = mThisPos = mPhys->getPosition();
+}
+
+void HitterComponent::update(float dt)
+{
+	mPrevPos = mThisPos;
+	mThisPos = mPhys->getPosition();
+}
+
+Ray HitterComponent::getLastRay() const
+{
+	Ray r;
+	r.start = mPrevPos;
+	r.end = mThisPos;
+	return r;
+}
+
+class Bullets {
+	static const unsigned int MAX_BULLETS = 256;
+	public:
+		Bullets(const WorldMap* wmap);
 		void shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Quaternion& ori);
 		void update(float dt);
+		std::vector<unsigned int> checkForHits(const std::vector<HittableComponent>& hittables);
 
 	private:
 		std::vector<PhysicsComponent> mPhysics;
-		WorldMap& mMap;
+		std::vector<HitterComponent> mHitters;
+		const WorldMap* mMap;
+		unsigned int mNumBullets;
 };
 
-Bullets::Bullets(WorldMap& wmap)
-	: mMap(wmap)
+Bullets::Bullets(const WorldMap* wmap)
+	: mMap(wmap),
+	mNumBullets(0)
 {
+	mPhysics.reserve(MAX_BULLETS);
+	mHitters.reserve(MAX_BULLETS);
 }
 
 void Bullets::update(float dt)
 {
-	for(unsigned int i = 0; i < mPhysics.size(); i++) {
+	for(unsigned int i = 0; i < mNumBullets; i++) {
 		mPhysics[i].update(dt);
+	}
+
+	for(unsigned int i = 0; i < mNumBullets; i++) {
+		mHitters[i].update(dt);
 	}
 }
 
 void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Quaternion& ori)
 {
-	PhysicsComponent ph(mMap, 0.0f, 0.0f);
-	ph.setPosition(pos);
-	ph.setOrientation(ori);
-	ph.setVelocity(Common::Math::rotate3D(Scene::WorldForward, ori) * 100.0f);
-	mPhysics.push_back(ph);
+	assert(mNumBullets < MAX_BULLETS);
+	PhysicsComponent* ph = &mPhysics[mNumBullets];
+	*ph = PhysicsComponent(mMap, 0.0f, 0.0f);
+	ph->setPosition(pos);
+	ph->setOrientation(ori);
+	ph->setVelocity(Common::Math::rotate3D(Scene::WorldForward, ori) * 100.0f);
+	mHitters[mNumBullets] = HitterComponent(ph);
+	mNumBullets++;
+
 	weapon.shoot();
+}
+
+std::vector<unsigned int> Bullets::checkForHits(const std::vector<HittableComponent>& hittables)
+{
+	std::vector<unsigned int> ret;
+	for(unsigned int j = 0; j < hittables.size(); j++) {
+		for(unsigned int i = 0; i < mNumBullets; i++) {
+			auto r = mHitters[i].getLastRay();
+			if(hittables[j].hit(r)) {
+				ret.push_back(j);
+				break;
+			}
+		}
+	}
+	return ret;
 }
 
 class ShooterComponent {
 	public:
-		ShooterComponent(PhysicsComponent& phys, Bullets& bullets);
+		ShooterComponent(const PhysicsComponent* phys, Bullets* bullets);
+		ShooterComponent() = default;
 		void shoot();
 		void update(float dt);
 
 	private:
-		PhysicsComponent& mPhys;
-		Bullets& mBullets;
+		const PhysicsComponent* mPhys;
+		Bullets* mBullets;
 		Weapon mWeapon;
 };
 
-ShooterComponent::ShooterComponent(PhysicsComponent& phys, Bullets& bullets)
+ShooterComponent::ShooterComponent(const PhysicsComponent* phys, Bullets* bullets)
 	: mPhys(phys),
 	mBullets(bullets)
 {
@@ -236,7 +342,7 @@ ShooterComponent::ShooterComponent(PhysicsComponent& phys, Bullets& bullets)
 void ShooterComponent::shoot()
 {
 	if(mWeapon.canShoot()) {
-		mBullets.shoot(mWeapon, mPhys.getPosition(), mPhys.getOrientation());
+		mBullets->shoot(mWeapon, mPhys->getPosition(), mPhys->getOrientation());
 	}
 }
 
@@ -247,7 +353,8 @@ void ShooterComponent::update(float dt)
 
 class InputComponent {
 	public:
-		InputComponent(PhysicsComponent& phys, ShooterComponent& shooter, bool player);
+		InputComponent(PhysicsComponent* phys, ShooterComponent* shooter, HittableComponent* hit, bool player);
+		InputComponent() = default;
 		void update(float dt);
 		bool handleKeyDown(float frameTime, SDLKey key);
 		bool handleKeyUp(float frameTime, SDLKey key);
@@ -255,28 +362,33 @@ class InputComponent {
 		bool handleMousePress(float frameTime, Uint8 button);
 
 	private:
-		PhysicsComponent& mPhys;
-		ShooterComponent& mShooter;
+		PhysicsComponent* mPhys;
+		ShooterComponent* mShooter;
+		HittableComponent* mHittable;
 		bool mPlayer;
 		Common::Vector3 mInputAccel;
 };
 
-InputComponent::InputComponent(PhysicsComponent& phys, ShooterComponent& shooter, bool player)
+InputComponent::InputComponent(PhysicsComponent* phys, ShooterComponent* shooter, HittableComponent* hit, bool player)
 	: mPhys(phys),
 	mShooter(shooter),
+	mHittable(hit),
 	mPlayer(player)
 {
 }
 
 void InputComponent::update(float dt)
 {
+	if(mHittable->hasDied())
+		return;
+
 	Common::Vector3 accel;
 	if(!mPlayer) {
 		accel = Common::Vector3(0.5f, 0.0f, 1.0f);
 	} else {
-		accel = Common::Math::rotate3D(mInputAccel, mPhys.getOrientation());
+		accel = Common::Math::rotate3D(mInputAccel, mPhys->getOrientation());
 	}
-	mPhys.addAcceleration(accel);
+	mPhys->addAcceleration(accel);
 }
 
 bool InputComponent::handleKeyDown(float frameTime, SDLKey key)
@@ -342,29 +454,36 @@ bool InputComponent::handleKeyUp(float frameTime, SDLKey key)
 
 bool InputComponent::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev)
 {
-	mPhys.rotate(-ev.xrel * 0.02f, -ev.yrel * 0.02f);
+	if(mHittable->hasDied())
+		return false;
+
+	mPhys->rotate(-ev.xrel * 0.02f, -ev.yrel * 0.02f);
 	return false;
 }
 
 bool InputComponent::handleMousePress(float frameTime, Uint8 button)
 {
+	if(mHittable->hasDied())
+		return false;
+
 	if(button == SDL_BUTTON_LEFT) {
-		mShooter.shoot();
+		mShooter->shoot();
 	}
 	return false;
 }
 
 class RenderComponent {
 	public:
-		RenderComponent(Scene::Scene& scene, const PhysicsComponent& phys, unsigned int num);
+		RenderComponent(Scene::Scene& scene, const PhysicsComponent* phys, unsigned int num);
+		RenderComponent() = default;
 		void update(float dt);
 
 	private:
-		const PhysicsComponent& mPhys;
+		const PhysicsComponent* mPhys;
 		Scene::MeshInstance* mMesh;
 };
 
-RenderComponent::RenderComponent(Scene::Scene& scene, const PhysicsComponent& phys, unsigned int num)
+RenderComponent::RenderComponent(Scene::Scene& scene, const PhysicsComponent* phys, unsigned int num)
 	: mPhys(phys)
 {
 	char name[256];
@@ -374,17 +493,20 @@ RenderComponent::RenderComponent(Scene::Scene& scene, const PhysicsComponent& ph
 
 void RenderComponent::update(float dt)
 {
-	mMesh->setPosition(mPhys.getPosition());
+	mMesh->setPosition(mPhys->getPosition());
 }
 
 class Soldiers {
+	static const unsigned int MAX_SOLDIERS = 256;
 	public:
 		Soldiers(Scene::Scene& scene);
 		void update(float dt);
-		void addSoldiers(WorldMap& wmap, Bullets& bullets);
+		void addSoldiers(const WorldMap* wmap, Bullets* bullets);
 		const Common::Vector3& getPlayerSoldierPosition() const;
 		const Common::Quaternion& getPlayerSoldierOrientation() const;
 		InputComponent& getPlayerInputComponent();
+		std::vector<HittableComponent> getHittables() const;
+		void processHits(const std::vector<unsigned int>& hits);
 
 	private:
 		unsigned int mNumSoldiers;
@@ -392,6 +514,7 @@ class Soldiers {
 		std::vector<PhysicsComponent> mPhysics;
 		std::vector<RenderComponent> mRenders;
 		std::vector<ShooterComponent> mShooters;
+		std::vector<HittableComponent> mHittables;
 
 		Scene::Scene& mScene;
 		unsigned int mPlayerSoldierIndex;
@@ -402,6 +525,11 @@ Soldiers::Soldiers(Scene::Scene& scene)
 	mScene(scene),
 	mPlayerSoldierIndex(0)
 {
+	mInputs.reserve(MAX_SOLDIERS);
+	mPhysics.reserve(MAX_SOLDIERS);
+	mRenders.reserve(MAX_SOLDIERS);
+	mShooters.reserve(MAX_SOLDIERS);
+	mHittables.reserve(MAX_SOLDIERS);
 }
 
 void Soldiers::update(float dt)
@@ -420,27 +548,20 @@ void Soldiers::update(float dt)
 	}
 }
 
-void Soldiers::addSoldiers(WorldMap& wmap, Bullets& bullets)
+void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
 {
-	for(int i = 0; i < 10; i++) {
-		mPhysics.emplace_back(wmap, 5.0f, 0.95f);
-	}
-
-	for(int i = 0; i < 10; i++) {
-		mShooters.emplace_back(mPhysics[i], bullets);
-	}
-
-	for(int i = 0; i < 10; i++) {
-		mInputs.emplace_back(mPhysics[i], mShooters[i], i == 0);
-	}
-
-	for(int i = 0; i < 10; i++) {
-		mRenders.emplace_back(mScene, mPhysics[i], i);
-	}
+	const unsigned int numSoldiers = 10;
 
 	mPlayerSoldierIndex = 0;
+	for(int i = 0; i < numSoldiers; i++) {
+		mPhysics[i] = PhysicsComponent(wmap, 5.0f, 0.95f);
+		mShooters[i] = ShooterComponent(&mPhysics[i], bullets);
+		mHittables[i] = HittableComponent(&mPhysics[i], 1.5f);
+		mInputs[i] = InputComponent(&mPhysics[i], &mShooters[i], &mHittables[i], i == mPlayerSoldierIndex);
+		mRenders[i] = RenderComponent(mScene, &mPhysics[i], i);
+	}
 
-	mNumSoldiers = 10;
+	mNumSoldiers = numSoldiers;
 }
 
 const Common::Vector3& Soldiers::getPlayerSoldierPosition() const
@@ -464,6 +585,18 @@ InputComponent& Soldiers::getPlayerInputComponent()
 	return mInputs[mPlayerSoldierIndex];
 }
 
+std::vector<HittableComponent> Soldiers::getHittables() const
+{
+	return std::vector<HittableComponent>(mHittables.begin(), mHittables.begin() + mNumSoldiers);
+}
+
+void Soldiers::processHits(const std::vector<unsigned int>& hits)
+{
+	for(auto i : hits) {
+		mHittables[i].die();
+	}
+}
+
 class World {
 	public:
 		World(Scene::Scene& scene);
@@ -485,14 +618,14 @@ class World {
 World::World(Scene::Scene& scene)
 	: mMap(scene),
 	mSoldiers(scene),
-	mBullets(mMap),
+	mBullets(&mMap),
 	mScene(scene)
 {
 }
 
 void World::addSoldiers()
 {
-	mSoldiers.addSoldiers(mMap, mBullets);
+	mSoldiers.addSoldiers(&mMap, &mBullets);
 }
 
 void World::createMap()
@@ -504,6 +637,9 @@ void World::update(float dt)
 {
 	mSoldiers.update(dt);
 	mBullets.update(dt);
+
+	auto hits = mBullets.checkForHits(mSoldiers.getHittables());
+	mSoldiers.processHits(hits);
 
 	auto& cam = mScene.getDefaultCamera();
 	cam.setPosition(mSoldiers.getPlayerSoldierPosition() + Common::Vector3(0.0f, 1.0f, 0.0f));
