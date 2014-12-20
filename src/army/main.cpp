@@ -44,6 +44,7 @@ class WorldMap {
 		WorldMap(Scene::Scene& scene);
 		void create();
 		float getHeightAt(float x, float y) const;
+		Common::Vector3 getNormalAt(float x, float y) const;
 
 	private:
 		Scene::Scene& mScene;
@@ -83,6 +84,22 @@ void WorldMap::create()
 float WorldMap::getHeightAt(float x, float y) const
 {
 	return 3.0f * sin(x * 0.20f) + 5.0f * cos(y * 0.10f) - 8.0f;
+}
+
+Common::Vector3 WorldMap::getNormalAt(float x, float y) const
+{
+	Common::Vector3 p1(x,
+			getHeightAt(x, y),
+			y);
+	Common::Vector3 p2(x + 0.5f,
+			getHeightAt(x + 0.5f, y),
+			y);
+	Common::Vector3 p3(x,
+			getHeightAt(x, y + 0.5f),
+			y + 0.5f);
+	Common::Vector3 u(p2 - p1);
+	Common::Vector3 v(p3 - p1);
+	return v.cross(u).normalized();
 }
 
 class Weapon {
@@ -125,11 +142,13 @@ void Weapon::shoot()
 class PhysicsComponent {
 	public:
 		PhysicsComponent() = default;
-		PhysicsComponent(const WorldMap* wmap, float maxvel, float velfriction);
+		PhysicsComponent(const WorldMap* wmap, float maxvel, float velfriction, float friction);
 		void update(float dt);
 		void addAcceleration(const Common::Vector3& vec);
 		const Common::Vector3& getPosition() const { return mPosition; }
+		const Common::Vector3& getVelocity() const { return mVelocity; }
 		const Common::Quaternion& getOrientation() const { return mOrientation; }
+		const Common::Quaternion& getPitch() const { return mPitch; }
 		void rotate(float yaw, float pitch);
 
 		void setPosition(const Common::Vector3& pos) { mPosition = pos; }
@@ -141,15 +160,18 @@ class PhysicsComponent {
 		Common::Vector3 mVelocity;
 		Common::Vector3 mAcceleration;
 		Common::Quaternion mOrientation;
+		Common::Quaternion mPitch;
 		const WorldMap* mMap;
 		float mMaxVel;
 		float mVelFriction;
+		float mFriction;
 };
 
-PhysicsComponent::PhysicsComponent(const WorldMap* wmap, float maxvel, float velfriction)
+PhysicsComponent::PhysicsComponent(const WorldMap* wmap, float maxvel, float velfriction, float friction)
 	: mMap(wmap),
 	mMaxVel(maxvel),
-	mVelFriction(velfriction)
+	mVelFriction(velfriction),
+	mFriction(friction)
 {
 }
 
@@ -162,11 +184,16 @@ void PhysicsComponent::update(float dt)
 	}
 
 	if(dt && mVelFriction) {
-		mVelocity = mVelocity * mVelFriction;
+		mAcceleration += mVelocity.normalized() * (1.0f - mVelFriction);
 	}
 
 	mPosition += mVelocity * dt;
-	mPosition.y = std::max(mPosition.y, mMap->getHeightAt(mPosition.x, mPosition.z));
+	float hgt = mMap->getHeightAt(mPosition.x, mPosition.z);
+	float ydiff = hgt - mPosition.y;
+	if(ydiff > 0.0f) {
+		mPosition.y += ydiff;
+		mVelocity = mVelocity * mFriction;
+	}
 
 	mAcceleration = Common::Vector3();
 }
@@ -181,6 +208,8 @@ void PhysicsComponent::rotate(float yaw, float pitch)
 {
 	mOrientation = mOrientation *
 		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), yaw);
+	mPitch = mPitch *
+		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 0.0f, 1.0f), pitch);
 }
 
 struct Ray {
@@ -227,18 +256,22 @@ bool HittableComponent::hasDied() const
 class HitterComponent {
 	public:
 		HitterComponent() = default;
-		HitterComponent(const PhysicsComponent* phys);
+		HitterComponent(const PhysicsComponent* phys, unsigned int shooterID);
 		void update(float dt);
 		Ray getLastRay() const;
+		float getSpeed() const;
+		unsigned int getShooterID() const;
 
 	private:
 		const PhysicsComponent* mPhys;
 		Common::Vector3 mPrevPos;
 		Common::Vector3 mThisPos;
+		unsigned int mShooterID;
 };
 
-HitterComponent::HitterComponent(const PhysicsComponent* phys)
-	: mPhys(phys)
+HitterComponent::HitterComponent(const PhysicsComponent* phys, unsigned int shooterID)
+	: mPhys(phys),
+	mShooterID(shooterID)
 {
 	mPrevPos = mThisPos = mPhys->getPosition();
 }
@@ -257,27 +290,70 @@ Ray HitterComponent::getLastRay() const
 	return r;
 }
 
+float HitterComponent::getSpeed() const
+{
+	return mPhys->getVelocity().length();
+}
+
+unsigned int HitterComponent::getShooterID() const
+{
+	return mShooterID;
+}
+
+class BulletRenderer {
+	public:
+		BulletRenderer();
+		BulletRenderer(Scene::Scene* scene, const HitterComponent* hit);
+		void update(float dt);
+
+	private:
+		Scene::Scene* mScene;
+		const HitterComponent* mHitter;
+};
+
+BulletRenderer::BulletRenderer()
+{
+}
+
+BulletRenderer::BulletRenderer(Scene::Scene* scene, const HitterComponent* hit)
+	: mScene(scene),
+	mHitter(hit)
+{
+}
+
+void BulletRenderer::update(float dt)
+{
+	auto r = mHitter->getLastRay();
+	if(mHitter->getSpeed() > 10.0f) {
+		mScene->addLine("Bullet line", r.start, r.end, Common::Color::Red);
+	}
+}
+
 class Bullets {
 	static const unsigned int MAX_BULLETS = 256;
 	public:
-		Bullets(const WorldMap* wmap);
-		void shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Quaternion& ori);
+		Bullets(const WorldMap* wmap, Scene::Scene* scene);
+		void shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Quaternion& ori, unsigned int shooterID);
 		void update(float dt);
 		std::vector<unsigned int> checkForHits(const std::vector<HittableComponent>& hittables);
 
 	private:
 		std::vector<PhysicsComponent> mPhysics;
 		std::vector<HitterComponent> mHitters;
+		std::vector<BulletRenderer> mRenders;
 		const WorldMap* mMap;
+		Scene::Scene* mScene;
 		unsigned int mNumBullets;
 };
 
-Bullets::Bullets(const WorldMap* wmap)
+Bullets::Bullets(const WorldMap* wmap, Scene::Scene* scene)
 	: mMap(wmap),
+	mScene(scene),
 	mNumBullets(0)
 {
 	mPhysics.reserve(MAX_BULLETS);
 	mHitters.reserve(MAX_BULLETS);
+	mRenders.reserve(MAX_BULLETS);
 }
 
 void Bullets::update(float dt)
@@ -289,19 +365,25 @@ void Bullets::update(float dt)
 	for(unsigned int i = 0; i < mNumBullets; i++) {
 		mHitters[i].update(dt);
 	}
+
+	for(unsigned int i = 0; i < mNumBullets; i++) {
+		mRenders[i].update(dt);
+	}
 }
 
-void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Quaternion& ori)
+void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Quaternion& ori, unsigned int shooterID)
 {
 	assert(mNumBullets < MAX_BULLETS);
 	PhysicsComponent* ph = &mPhysics[mNumBullets];
-	*ph = PhysicsComponent(mMap, 0.0f, 0.0f);
-	ph->setPosition(pos);
+	*ph = PhysicsComponent(mMap, 0.0f, 0.99f, 0.0f);
+	ph->setPosition(pos + Common::Vector3(0.0f, 1.0f, 0.0f));
 	ph->setOrientation(ori);
 	ph->setVelocity(Common::Math::rotate3D(Scene::WorldForward, ori) * 100.0f);
-	mHitters[mNumBullets] = HitterComponent(ph);
-	mNumBullets++;
 
+	mHitters[mNumBullets] = HitterComponent(ph, shooterID);
+	mRenders[mNumBullets] = BulletRenderer(mScene, &mHitters[mNumBullets]);
+
+	mNumBullets++;
 	weapon.shoot();
 }
 
@@ -311,7 +393,7 @@ std::vector<unsigned int> Bullets::checkForHits(const std::vector<HittableCompon
 	for(unsigned int j = 0; j < hittables.size(); j++) {
 		for(unsigned int i = 0; i < mNumBullets; i++) {
 			auto r = mHitters[i].getLastRay();
-			if(hittables[j].hit(r)) {
+			if(mHitters[i].getShooterID() != j && hittables[j].hit(r)) {
 				ret.push_back(j);
 				break;
 			}
@@ -322,7 +404,7 @@ std::vector<unsigned int> Bullets::checkForHits(const std::vector<HittableCompon
 
 class ShooterComponent {
 	public:
-		ShooterComponent(const PhysicsComponent* phys, Bullets* bullets);
+		ShooterComponent(const PhysicsComponent* phys, Bullets* bullets, unsigned int shooterID);
 		ShooterComponent() = default;
 		void shoot();
 		void update(float dt);
@@ -331,18 +413,20 @@ class ShooterComponent {
 		const PhysicsComponent* mPhys;
 		Bullets* mBullets;
 		Weapon mWeapon;
+		unsigned int mShooterID;
 };
 
-ShooterComponent::ShooterComponent(const PhysicsComponent* phys, Bullets* bullets)
+ShooterComponent::ShooterComponent(const PhysicsComponent* phys, Bullets* bullets, unsigned int shooterID)
 	: mPhys(phys),
-	mBullets(bullets)
+	mBullets(bullets),
+	mShooterID(shooterID)
 {
 }
 
 void ShooterComponent::shoot()
 {
 	if(mWeapon.canShoot()) {
-		mBullets->shoot(mWeapon, mPhys->getPosition(), mPhys->getOrientation());
+		mBullets->shoot(mWeapon, mPhys->getPosition(), mPhys->getOrientation() * mPhys->getPitch(), mShooterID);
 	}
 }
 
@@ -503,7 +587,7 @@ class Soldiers {
 		void update(float dt);
 		void addSoldiers(const WorldMap* wmap, Bullets* bullets);
 		const Common::Vector3& getPlayerSoldierPosition() const;
-		const Common::Quaternion& getPlayerSoldierOrientation() const;
+		Common::Quaternion getPlayerSoldierOrientation() const;
 		InputComponent& getPlayerInputComponent();
 		std::vector<HittableComponent> getHittables() const;
 		void processHits(const std::vector<unsigned int>& hits);
@@ -554,8 +638,8 @@ void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
 
 	mPlayerSoldierIndex = 0;
 	for(int i = 0; i < numSoldiers; i++) {
-		mPhysics[i] = PhysicsComponent(wmap, 5.0f, 0.95f);
-		mShooters[i] = ShooterComponent(&mPhysics[i], bullets);
+		mPhysics[i] = PhysicsComponent(wmap, 5.0f, 0.95f, 1.0f);
+		mShooters[i] = ShooterComponent(&mPhysics[i], bullets, i);
 		mHittables[i] = HittableComponent(&mPhysics[i], 1.5f);
 		mInputs[i] = InputComponent(&mPhysics[i], &mShooters[i], &mHittables[i], i == mPlayerSoldierIndex);
 		mRenders[i] = RenderComponent(mScene, &mPhysics[i], i);
@@ -571,11 +655,11 @@ const Common::Vector3& Soldiers::getPlayerSoldierPosition() const
 	return mPhysics[mPlayerSoldierIndex].getPosition();
 }
 
-const Common::Quaternion& Soldiers::getPlayerSoldierOrientation() const
+Common::Quaternion Soldiers::getPlayerSoldierOrientation() const
 {
 	assert(mPlayerSoldierIndex < mNumSoldiers);
 
-	return mPhysics[mPlayerSoldierIndex].getOrientation();
+	return mPhysics[mPlayerSoldierIndex].getOrientation() * mPhysics[mPlayerSoldierIndex].getPitch();
 }
 
 InputComponent& Soldiers::getPlayerInputComponent()
@@ -613,14 +697,25 @@ class World {
 		Soldiers mSoldiers;
 		Bullets mBullets;
 		Scene::Scene& mScene;
+		bool mObserverMode;
+		Scene::Camera& mCamera;
+		std::map<SDLKey, std::function<void (float)>> mControls;
 };
 
 World::World(Scene::Scene& scene)
 	: mMap(scene),
 	mSoldiers(scene),
-	mBullets(&mMap),
-	mScene(scene)
+	mBullets(&mMap, &scene),
+	mScene(scene),
+	mObserverMode(false),
+	mCamera(mScene.getDefaultCamera())
 {
+	mControls[SDLK_w] = [&] (float p) { mCamera.setForwardMovement(p); };
+	mControls[SDLK_q] = [&] (float p) { mCamera.setUpwardsMovement(p); };
+	mControls[SDLK_d] = [&] (float p) { mCamera.setSidewaysMovement(p); };
+	mControls[SDLK_s] = [&] (float p) { mCamera.setForwardMovement(-p); };
+	mControls[SDLK_e] = [&] (float p) { mCamera.setUpwardsMovement(-p); };
+	mControls[SDLK_a] = [&] (float p) { mCamera.setSidewaysMovement(-p); };
 }
 
 void World::addSoldiers()
@@ -635,39 +730,80 @@ void World::createMap()
 
 void World::update(float dt)
 {
+	if(mObserverMode)
+		mCamera.applyMovementKeys(dt);
+
 	mSoldiers.update(dt);
 	mBullets.update(dt);
 
 	auto hits = mBullets.checkForHits(mSoldiers.getHittables());
 	mSoldiers.processHits(hits);
 
-	auto& cam = mScene.getDefaultCamera();
-	cam.setPosition(mSoldiers.getPlayerSoldierPosition() + Common::Vector3(0.0f, 1.0f, 0.0f));
+	if(!mObserverMode) {
+		mCamera.setPosition(mSoldiers.getPlayerSoldierPosition() + Common::Vector3(0.0f, 1.0f, 0.0f));
 
-	auto ori = mSoldiers.getPlayerSoldierOrientation();
-	auto tgt = Common::Math::rotate3D(Scene::WorldForward, ori);
-	auto up = Common::Math::rotate3D(Scene::WorldUp, ori);
-	cam.lookAt(tgt, up);
+		auto ori = mSoldiers.getPlayerSoldierOrientation();
+		auto tgt = Common::Math::rotate3D(Scene::WorldForward, ori);
+		auto up = Common::Math::rotate3D(Scene::WorldUp, ori);
+		mCamera.lookAt(tgt, up);
+	}
 }
 
 bool World::handleKeyDown(float frameTime, SDLKey key)
 {
-	return mSoldiers.getPlayerInputComponent().handleKeyDown(frameTime, key);
+	if(key == SDLK_F1) {
+		mObserverMode = !mObserverMode;
+		return false;
+	}
+
+	if(mObserverMode) {
+		auto it = mControls.find(key);
+		if(it != mControls.end()) {
+			it->second(0.1f);
+			return false;
+		} else {
+			if(key == SDLK_ESCAPE) {
+				return true;
+			}
+		}
+		return false;
+	} else {
+		return mSoldiers.getPlayerInputComponent().handleKeyDown(frameTime, key);
+	}
 }
 
 bool World::handleKeyUp(float frameTime, SDLKey key)
 {
-	return mSoldiers.getPlayerInputComponent().handleKeyUp(frameTime, key);
+	if(mObserverMode) {
+		auto it = mControls.find(key);
+		if(it != mControls.end()) {
+			it->second(0.0f);
+		}
+		return false;
+	} else {
+		return mSoldiers.getPlayerInputComponent().handleKeyUp(frameTime, key);
+	}
 }
 
 bool World::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev)
 {
-	return mSoldiers.getPlayerInputComponent().handleMouseMotion(frameTime, ev);
+	if(mObserverMode) {
+		if(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(1)) {
+			mCamera.rotate(-ev.xrel * 0.02f, -ev.yrel * 0.02f);
+		}
+		return false;
+	} else {
+		return mSoldiers.getPlayerInputComponent().handleMouseMotion(frameTime, ev);
+	}
 }
 
 bool World::handleMousePress(float frameTime, Uint8 button)
 {
-	return mSoldiers.getPlayerInputComponent().handleMousePress(frameTime, button);
+	if(mObserverMode) {
+		return false;
+	} else {
+		return mSoldiers.getPlayerInputComponent().handleMousePress(frameTime, button);
+	}
 }
 
 class AppDriver : public Common::Driver {
@@ -681,22 +817,14 @@ class AppDriver : public Common::Driver {
 		virtual bool prerenderUpdate(float frameTime) override;
 
 	private:
-		void handleMouseMove(float dx, float dy);
-
 		Scene::Scene mScene;
-		Scene::Camera& mCamera;
 		World mWorld;
-
-		std::map<SDLKey, std::function<void (float)>> mControls;
-		bool mObserverMode;
 };
 
 AppDriver::AppDriver()
 	: Common::Driver(800, 600, "Army"),
 	mScene(800, 600),
-	mCamera(mScene.getDefaultCamera()),
-	mWorld(mScene),
-	mObserverMode(false)
+	mWorld(mScene)
 {
 	mScene.addModel("Cube", "share/textured-cube.obj");
 	mScene.addModel("Tree", "share/tree.obj");
@@ -709,84 +837,32 @@ AppDriver::AppDriver()
 	mScene.getDirectionalLight().setDirection(Common::Vector3(0.5f, -1.0f, 0.5f));
 	mScene.getDirectionalLight().setColor(Common::Vector3(0.9f, 0.9f, 0.9f));
 
-	mControls[SDLK_w] = [&] (float p) { mCamera.setForwardMovement(p); };
-	mControls[SDLK_q] = [&] (float p) { mCamera.setUpwardsMovement(p); };
-	mControls[SDLK_d] = [&] (float p) { mCamera.setSidewaysMovement(p); };
-	mControls[SDLK_s] = [&] (float p) { mCamera.setForwardMovement(-p); };
-	mControls[SDLK_e] = [&] (float p) { mCamera.setUpwardsMovement(-p); };
-	mControls[SDLK_a] = [&] (float p) { mCamera.setSidewaysMovement(-p); };
-
 	mWorld.createMap();
 	mWorld.addSoldiers();
-
-	mObserverMode = false;
 }
 
 bool AppDriver::handleKeyDown(float frameTime, SDLKey key)
 {
-	if(mObserverMode) {
-		auto it = mControls.find(key);
-		if(it != mControls.end()) {
-			it->second(0.1f);
-			return false;
-		} else {
-			if(key == SDLK_ESCAPE) {
-				return true;
-			}
-		}
-	} else {
-		return mWorld.handleKeyDown(frameTime, key);
-	}
-
-	return false;
+	return mWorld.handleKeyDown(frameTime, key);
 }
 
 bool AppDriver::handleKeyUp(float frameTime, SDLKey key)
 {
-	if(mObserverMode) {
-		auto it = mControls.find(key);
-		if(it != mControls.end()) {
-			it->second(0.0f);
-		}
-	} else {
-		return mWorld.handleKeyUp(frameTime, key);
-	}
-
-	return false;
+	return mWorld.handleKeyUp(frameTime, key);
 }
 
 bool AppDriver::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev)
 {
-	if(mObserverMode) {
-		if(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(1)) {
-			handleMouseMove(ev.xrel, ev.yrel);
-		}
-	} else {
-		return mWorld.handleMouseMotion(frameTime, ev);
-	}
-
-	return false;
+	return mWorld.handleMouseMotion(frameTime, ev);
 }
 
 bool AppDriver::handleMousePress(float frameTime, Uint8 button)
 {
-	if(!mObserverMode) {
-		return mWorld.handleMousePress(frameTime, button);
-	}
-
-	return false;
-}
-
-void AppDriver::handleMouseMove(float dx, float dy)
-{
-	mCamera.rotate(-dx * 0.02f, -dy * 0.02f);
+	return mWorld.handleMousePress(frameTime, button);
 }
 
 bool AppDriver::prerenderUpdate(float frameTime)
 {
-	if(mObserverMode)
-		mCamera.applyMovementKeys(frameTime);
-
 	mWorld.update(frameTime);
 
 	return false;
