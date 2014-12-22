@@ -76,7 +76,7 @@ void WorldMap::create()
 		char name[256];
 		snprintf(name, 255, "Tree%d", i);
 
-		auto treeInst = mScene.addMeshInstance(name, "Tree", "Snow");
+		auto treeInst = mScene.addMeshInstance(name, "Tree", "Tree", false, true);
 		treeInst->setPosition(pos);
 	}
 }
@@ -833,9 +833,12 @@ AppDriver::AppDriver()
 	mScene(800, 600),
 	mWorld(mScene)
 {
+	SDL_WM_GrabInput(SDL_GRAB_ON);
+	SDL_ShowCursor(SDL_DISABLE);
 	mScene.addModel("Cube", "share/textured-cube.obj");
 	mScene.addModel("Tree", "share/tree.obj");
 	mScene.addTexture("Snow", "share/snow.jpg");
+	mScene.addTexture("Tree", "share/tree.png");
 
 	mScene.getAmbientLight().setState(true);
 	mScene.getAmbientLight().setColor(Common::Color(127, 127, 127));
