@@ -240,7 +240,8 @@ HittableComponent::HittableComponent(const PhysicsComponent* phys, float radius)
 
 bool HittableComponent::hit(const Ray& ray) const
 {
-	return Common::Math::raySphereIntersect(ray.start, ray.end, mPhys->getPosition(), mRadius);
+	auto ret = Common::Math::segmentCircleIntersect(ray.start, ray.end, mPhys->getPosition(), mRadius);
+	return ret;
 }
 
 void HittableComponent::die()
@@ -278,8 +279,14 @@ HitterComponent::HitterComponent(const PhysicsComponent* phys, unsigned int shoo
 
 void HitterComponent::update(float dt)
 {
-	mPrevPos = mThisPos;
-	mThisPos = mPhys->getPosition();
+	// ensure the length of the ray isn't 0 or near 0 which might
+	// lead to wrong result from
+	// Common::Math::segmentCircleIntersect().
+	auto newpos = mPhys->getPosition();
+	if(mThisPos.distance2(newpos) > 0.1f) {
+		mPrevPos = mThisPos;
+		mThisPos = newpos;
+	}
 }
 
 Ray HitterComponent::getLastRay() const
