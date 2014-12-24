@@ -169,7 +169,7 @@ class PhysicsComponent {
 		const Common::Vector3& getPosition() const { return mPosition; }
 		const Common::Vector3& getVelocity() const { return mVelocity; }
 		const Common::Quaternion& getOrientation() const { return mOrientation; }
-		Common::Quaternion getPitch() const;
+		Common::Quaternion getAimPitch() const;
 		void rotate(float yaw, float pitch);
 
 		void setPosition(const Common::Vector3& pos) { mPosition = pos; }
@@ -190,7 +190,7 @@ class PhysicsComponent {
 		Common::Vector3 mVelocity;
 		Common::Vector3 mAcceleration;
 		Common::Quaternion mOrientation;
-		float mPitch;
+		float mAimPitch;
 		const WorldMap* mMap;
 		float mMaxVel;
 		float mVelFriction;
@@ -202,7 +202,7 @@ class PhysicsComponent {
 };
 
 PhysicsComponent::PhysicsComponent(const WorldMap* wmap, float maxvel, float velfriction, float friction, bool bullet)
-	: mPitch(0.0f),
+	: mAimPitch(0.0f),
 	mMap(wmap),
 	mMaxVel(maxvel),
 	mVelFriction(velfriction),
@@ -335,16 +335,16 @@ void PhysicsComponent::addAcceleration(const Common::Vector3& vec)
 	mAcceleration.truncate(5.0f);
 }
 
-Common::Quaternion PhysicsComponent::getPitch() const
+Common::Quaternion PhysicsComponent::getAimPitch() const
 {
-	return Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 0.0f, 1.0f), mPitch);
+	return Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 0.0f, 1.0f), mAimPitch);
 }
 
 void PhysicsComponent::rotate(float yaw, float pitch)
 {
 	mOrientation = mOrientation *
 		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), yaw);
-	mPitch = Common::clamp<float>(-HALF_PI * 0.6f, mPitch + pitch, HALF_PI * 0.6f);
+	mAimPitch = Common::clamp<float>(-HALF_PI * 0.6f, mAimPitch + pitch, HALF_PI * 0.6f);
 }
 
 struct Ray {
@@ -563,7 +563,7 @@ ShooterComponent::ShooterComponent(const PhysicsComponent* phys, Bullets* bullet
 void ShooterComponent::shoot()
 {
 	if(mWeapon.canShoot()) {
-		mBullets->shoot(mWeapon, mPhys->getPosition(), mPhys->getOrientation() * mPhys->getPitch(), mShooterID);
+		mBullets->shoot(mWeapon, mPhys->getPosition(), mPhys->getOrientation() * mPhys->getAimPitch(), mShooterID);
 	}
 }
 
@@ -646,7 +646,7 @@ bool InputComponent::handleKeyDown(float frameTime, SDLKey key)
 			{
 				std::cout << "Position: " << mPhys->getPosition() << "\n";
 				std::cout << "Orientation: " << mPhys->getOrientation() << "\n";
-				std::cout << "Pitch: " << mPhys->getPitch() << "\n";
+				std::cout << "Aim pitch: " << mPhys->getAimPitch() << "\n";
 			}
 			break;
 
@@ -806,7 +806,7 @@ Common::Quaternion Soldiers::getPlayerSoldierOrientation() const
 {
 	assert(mPlayerSoldierIndex < mNumSoldiers);
 
-	return mPhysics[mPlayerSoldierIndex].getOrientation() * mPhysics[mPlayerSoldierIndex].getPitch();
+	return mPhysics[mPlayerSoldierIndex].getOrientation() * mPhysics[mPlayerSoldierIndex].getAimPitch();
 }
 
 InputComponent& Soldiers::getPlayerInputComponent()
