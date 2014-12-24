@@ -508,7 +508,7 @@ void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Qu
 	assert(mNumBullets < MAX_BULLETS);
 	PhysicsComponent* ph = &mPhysics[mNumBullets];
 	*ph = PhysicsComponent(mMap, 0.0f, 0.99f, 0.0f, true);
-	ph->setPosition(pos + Common::Vector3(0.0f, 1.0f, 0.0f));
+	ph->setPosition(pos + Common::Vector3(0.0f, 1.7f, 0.0f));
 	ph->setOrientation(ori);
 	ph->setVelocity(Common::Math::rotate3D(Scene::WorldForward, ori) * 700.0f);
 
@@ -704,12 +704,13 @@ RenderComponent::RenderComponent(Scene::Scene& scene, const PhysicsComponent* ph
 {
 	char name[256];
 	snprintf(name, 255, "Soldier%d", num);
-	mMesh = scene.addMeshInstance(name, "Cube", "Snow").get();
+	mMesh = scene.addMeshInstance(name, "Soldier", "Soldier").get();
 }
 
 void RenderComponent::update(float dt)
 {
 	mMesh->setPosition(mPhys->getPosition());
+	mMesh->setRotation(mPhys->getOrientation());
 }
 
 class Soldiers {
@@ -771,7 +772,7 @@ void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
 	mPlayerSoldierIndex = 0;
 	for(int i = 0; i < numSoldiers; i++) {
 		mPhysics[i] = PhysicsComponent(wmap, 5.0f, 0.95f, 1.0f, false);
-		mPhysics[i].setPosition(Common::Vector3(64.0f, 0.0f, 64.0f));
+		mPhysics[i].setPosition(Common::Vector3(64.0f + rand() % 32 - 16, 0.0f, 64.0f + rand() % 32 - 16));
 		mShooters[i] = ShooterComponent(&mPhysics[i], bullets, i);
 		mHittables[i] = HittableComponent(&mPhysics[i], 1.5f);
 		mInputs[i] = InputComponent(&mPhysics[i], &mShooters[i], &mHittables[i], i == mPlayerSoldierIndex);
@@ -873,11 +874,13 @@ void World::update(float dt)
 	mSoldiers.processHits(hits);
 
 	if(!mObserverMode) {
-		mCamera.setPosition(mSoldiers.getPlayerSoldierPosition() + Common::Vector3(0.0f, 1.0f, 0.0f));
-
 		auto ori = mSoldiers.getPlayerSoldierOrientation();
 		auto tgt = Common::Math::rotate3D(Scene::WorldForward, ori);
 		auto up = Common::Math::rotate3D(Scene::WorldUp, ori);
+
+		mCamera.setPosition(mSoldiers.getPlayerSoldierPosition() +
+				Common::Vector3(0.0f, 1.7f, 0.0f) +
+				tgt.normalized() * 0.5f);
 		mCamera.lookAt(tgt, up);
 	}
 }
@@ -961,9 +964,10 @@ AppDriver::AppDriver()
 {
 	SDL_WM_GrabInput(SDL_GRAB_ON);
 	SDL_ShowCursor(SDL_DISABLE);
-	mScene.addModel("Cube", "share/textured-cube.obj");
+	mScene.addModel("Soldier", "share/soldier.obj");
 	mScene.addModel("Tree", "share/tree.obj");
 	mScene.addTexture("Snow", "share/snow.jpg");
+	mScene.addTexture("Soldier", "share/soldier.jpg");
 	mScene.addTexture("Tree", "share/tree.png");
 
 	mScene.getAmbientLight().setState(true);
