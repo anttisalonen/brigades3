@@ -169,7 +169,7 @@ class PhysicsComponent {
 		const Common::Vector3& getPosition() const { return mPosition; }
 		const Common::Vector3& getVelocity() const { return mVelocity; }
 		const Common::Quaternion& getOrientation() const { return mOrientation; }
-		const Common::Quaternion& getPitch() const { return mPitch; }
+		Common::Quaternion getPitch() const;
 		void rotate(float yaw, float pitch);
 
 		void setPosition(const Common::Vector3& pos) { mPosition = pos; }
@@ -190,7 +190,7 @@ class PhysicsComponent {
 		Common::Vector3 mVelocity;
 		Common::Vector3 mAcceleration;
 		Common::Quaternion mOrientation;
-		Common::Quaternion mPitch;
+		float mPitch;
 		const WorldMap* mMap;
 		float mMaxVel;
 		float mVelFriction;
@@ -202,7 +202,8 @@ class PhysicsComponent {
 };
 
 PhysicsComponent::PhysicsComponent(const WorldMap* wmap, float maxvel, float velfriction, float friction, bool bullet)
-	: mMap(wmap),
+	: mPitch(0.0f),
+	mMap(wmap),
 	mMaxVel(maxvel),
 	mVelFriction(velfriction),
 	mFriction(friction),
@@ -334,12 +335,16 @@ void PhysicsComponent::addAcceleration(const Common::Vector3& vec)
 	mAcceleration.truncate(5.0f);
 }
 
+Common::Quaternion PhysicsComponent::getPitch() const
+{
+	return Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 0.0f, 1.0f), mPitch);
+}
+
 void PhysicsComponent::rotate(float yaw, float pitch)
 {
 	mOrientation = mOrientation *
 		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), yaw);
-	mPitch = mPitch *
-		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 0.0f, 1.0f), pitch);
+	mPitch = Common::clamp<float>(-HALF_PI * 0.6f, mPitch + pitch, HALF_PI * 0.6f);
 }
 
 struct Ray {
@@ -635,6 +640,14 @@ bool InputComponent::handleKeyDown(float frameTime, SDLKey key)
 
 		case SDLK_a:
 			mInputAccel.z = -1.0f;
+			break;
+
+		case SDLK_p:
+			{
+				std::cout << "Position: " << mPhys->getPosition() << "\n";
+				std::cout << "Orientation: " << mPhys->getOrientation() << "\n";
+				std::cout << "Pitch: " << mPhys->getPitch() << "\n";
+			}
 			break;
 
 		default:
