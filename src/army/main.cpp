@@ -731,17 +731,25 @@ bool InputComponent::handleMousePress(float frameTime, Uint8 button)
 
 class RenderComponent {
 	public:
-		RenderComponent(Scene::Scene& scene, const PhysicsComponent* phys, unsigned int num);
+		RenderComponent(Scene::Scene& scene,
+				const PhysicsComponent* phys,
+				const HittableComponent* hit,
+				unsigned int num);
 		RenderComponent() = default;
 		void update(float dt);
 
 	private:
 		const PhysicsComponent* mPhys;
+		const HittableComponent* mHit;
 		Scene::MeshInstance* mMesh;
 };
 
-RenderComponent::RenderComponent(Scene::Scene& scene, const PhysicsComponent* phys, unsigned int num)
-	: mPhys(phys)
+RenderComponent::RenderComponent(Scene::Scene& scene,
+		const PhysicsComponent* phys,
+		const HittableComponent* hit,
+		unsigned int num)
+	: mPhys(phys),
+	mHit(hit)
 {
 	char name[256];
 	snprintf(name, 255, "Soldier%d", num);
@@ -751,7 +759,13 @@ RenderComponent::RenderComponent(Scene::Scene& scene, const PhysicsComponent* ph
 void RenderComponent::update(float dt)
 {
 	mMesh->setPosition(mPhys->getPosition());
-	mMesh->setRotation(mPhys->getOrientation());
+	if(mHit->hasDied()) {
+		// TODO: This could be animated
+		// TODO: The angle should correspond to the ground
+		mMesh->setRotation(mPhys->getOrientation() * Common::Quaternion(0.0f, 0.0f, sqrt(0.5f), sqrt(0.5f)));
+	} else {
+		mMesh->setRotation(mPhys->getOrientation());
+	}
 }
 
 class Soldiers {
@@ -817,7 +831,7 @@ void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
 		mShooters[i] = ShooterComponent(&mPhysics[i], bullets, i);
 		mHittables[i] = HittableComponent(&mPhysics[i], 1.5f);
 		mInputs[i] = InputComponent(&mPhysics[i], &mShooters[i], &mHittables[i], i == mPlayerSoldierIndex);
-		mRenders[i] = RenderComponent(mScene, &mPhysics[i], i);
+		mRenders[i] = RenderComponent(mScene, &mPhysics[i], &mHittables[i], i);
 	}
 
 	mNumSoldiers = numSoldiers;
