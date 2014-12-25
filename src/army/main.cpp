@@ -14,6 +14,34 @@
 #include <common/Math.h>
 #include <common/DriverFramework.h>
 
+class WindowFocus {
+	public:
+		static void setWindowFocus(bool focus);
+		static bool getWindowFocus();
+
+	private:
+		static bool mWindowFocus;
+};
+
+bool WindowFocus::mWindowFocus = false;
+
+void WindowFocus::setWindowFocus(bool focus)
+{
+	if(focus) {
+		SDL_WM_GrabInput(SDL_GRAB_ON);
+		SDL_ShowCursor(SDL_DISABLE);
+	} else {
+		SDL_WM_GrabInput(SDL_GRAB_OFF);
+		SDL_ShowCursor(SDL_ENABLE);
+	}
+	mWindowFocus = focus;
+}
+
+bool WindowFocus::getWindowFocus()
+{
+	return mWindowFocus;
+}
+
 class Heightmap : public Scene::Heightmap {
 	public:
 		Heightmap(std::function<float (float, float)> func);
@@ -900,6 +928,28 @@ void World::update(float dt)
 
 bool World::handleKeyDown(float frameTime, SDLKey key)
 {
+	switch(key) {
+		case SDLK_TAB:
+			if(SDL_GetModState() & KMOD_ALT) {
+				SDL_WM_IconifyWindow();
+				return false;
+			}
+			break;
+
+		case SDLK_RCTRL:
+		case SDLK_LCTRL:
+		case SDLK_RALT:
+		case SDLK_LALT:
+			if((SDL_GetModState() & KMOD_CTRL) && (SDL_GetModState() & KMOD_ALT)) {
+				WindowFocus::setWindowFocus(false);
+				return false;
+			}
+			break;
+
+		default:
+			break;
+	}
+
 	if(key == SDLK_F1) {
 		mObserverMode = !mObserverMode;
 		return false;
@@ -948,6 +998,11 @@ bool World::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev)
 
 bool World::handleMousePress(float frameTime, Uint8 button)
 {
+	if(button == SDL_BUTTON_LEFT && !WindowFocus::getWindowFocus()) {
+		WindowFocus::setWindowFocus(true);
+		return false;
+	}
+
 	if(mObserverMode) {
 		return false;
 	} else {
@@ -975,8 +1030,7 @@ AppDriver::AppDriver()
 	mScene(800, 600),
 	mWorld(mScene)
 {
-	SDL_WM_GrabInput(SDL_GRAB_ON);
-	SDL_ShowCursor(SDL_DISABLE);
+	WindowFocus::setWindowFocus(true);
 	mScene.addModel("Soldier", "share/soldier.obj");
 	mScene.addModel("Tree", "share/tree.obj");
 	mScene.addTexture("Snow", "share/snow.jpg");
