@@ -110,6 +110,7 @@ void WorldMap::create()
 	mi->setPosition(Common::Vector3(hm.getWidth() * 0.5f, 0.0f, hm.getWidth() * 0.5f));
 
 	std::uniform_real_distribution<double> treeDis(0.0, hm.getWidth());
+	// TODO: Create a single mesh instance with all models instead
 	for(int i = 0; i < 500; i++) {
 		float x = treeDis(mGen);
 		float y = treeDis(mGen);
@@ -132,6 +133,7 @@ float WorldMap::getHeightAt(float x, float y) const
 
 std::vector<Tree> WorldMap::getTreesAt(float x, float y, float r) const
 {
+	// TODO: This can be optimised
 	return mTrees;
 }
 
