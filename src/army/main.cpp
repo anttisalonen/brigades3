@@ -559,6 +559,9 @@ std::vector<unsigned int> Bullets::checkForHits(const std::vector<HittableCompon
 	std::vector<unsigned int> ret;
 	for(unsigned int j = 0; j < hittables.size(); j++) {
 		for(unsigned int i = 0; i < mNumBullets; i++) {
+			if(!mHitters[i].isActive())
+				continue;
+
 			auto r = mHitters[i].getLastRay();
 			if(mHitters[i].getShooterID() != j && hittables[j].hit(r)) {
 				ret.push_back(j);
