@@ -434,7 +434,7 @@ struct Ray {
 class HittableComponent {
 	public:
 		HittableComponent() = default;
-		HittableComponent(const SoldierPhysics* phys, float radius);
+		HittableComponent(const SoldierPhysics* phys, float radius, float height);
 		bool hit(const Ray& ray) const;
 		void die();
 		bool hasDied() const;
@@ -442,20 +442,24 @@ class HittableComponent {
 	private:
 		const SoldierPhysics* mPhys;
 		float mRadius;
+		float mHeight;
 		bool mDied;
 };
 
-HittableComponent::HittableComponent(const SoldierPhysics* phys, float radius)
+HittableComponent::HittableComponent(const SoldierPhysics* phys, float radius, float height)
 	: mPhys(phys),
 	mRadius(radius),
+	mHeight(height),
 	mDied(false)
 {
 }
 
 bool HittableComponent::hit(const Ray& ray) const
 {
-	auto ret = Common::Math::segmentCircleIntersect(ray.start, ray.end, mPhys->getPosition(), mRadius);
-	return ret;
+	auto ret = Common::Math::segmentSegmentDistance3D(ray.start, ray.end,
+			mPhys->getPosition(),
+			mPhys->getPosition() + Common::Vector3(0.0f, mHeight, 0.0f));
+	return ret <= mRadius;
 }
 
 void HittableComponent::die()
@@ -888,7 +892,7 @@ void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
 		mPhysics[i] = SoldierPhysics(wmap, 5.0f, 0.95f, 1.0f);
 		mPhysics[i].setPosition(Common::Vector3(64.0f + rand() % 32 - 16, 0.0f, 64.0f + rand() % 32 - 16));
 		mShooters[i] = ShooterComponent(&mPhysics[i], bullets, i);
-		mHittables[i] = HittableComponent(&mPhysics[i], 1.5f);
+		mHittables[i] = HittableComponent(&mPhysics[i], 0.3f, 1.7f);
 		mInputs[i] = InputComponent(&mPhysics[i], &mShooters[i], &mHittables[i], i == mPlayerSoldierIndex);
 		mRenders[i] = RenderComponent(mScene, &mPhysics[i], &mHittables[i], i);
 	}
