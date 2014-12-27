@@ -190,10 +190,37 @@ void Weapon::shoot()
 		mBullets--;
 }
 
-class PhysicsComponent {
+template <typename Physics>
+class PhysicsCommon {
 	public:
-		PhysicsComponent() = default;
-		PhysicsComponent(const WorldMap* wmap, float maxvel, float velfriction, float friction, bool bullet);
+		static void update(float dt, Physics& p);
+};
+
+template <typename Physics>
+void PhysicsCommon<Physics>::update(float dt, Physics& p)
+{
+	p.mAcceleration.y -= 10.0f;
+	p.mVelocity += p.mAcceleration * dt;
+	if(p.mMaxVel) {
+		p.mVelocity.truncate(p.mMaxVel);
+	}
+
+	if(dt && p.mVelFriction) {
+		p.mAcceleration += p.mVelocity.normalized() * (1.0f - p.mVelFriction);
+	}
+
+	auto oldpos = p.mPosition;
+	p.mPosition += p.mVelocity * dt;
+	p.checkTreeCollision(oldpos);
+	p.checkLandCollision(oldpos);
+
+	p.mAcceleration = Common::Vector3();
+}
+
+class SoldierPhysics {
+	public:
+		SoldierPhysics() = default;
+		SoldierPhysics(const WorldMap* wmap, float maxvel, float velfriction, float friction);
 		void update(float dt);
 		void addAcceleration(const Common::Vector3& vec);
 		const Common::Vector3& getPosition() const { return mPosition; }
@@ -205,16 +232,10 @@ class PhysicsComponent {
 		void setPosition(const Common::Vector3& pos) { mPosition = pos; }
 		void setOrientation(const Common::Quaternion& ori) { mOrientation = ori; }
 		void setVelocity(const Common::Vector3& v) { mVelocity = v; }
-		bool isActive() const { return mActive; }
 
 	private:
 		void checkTreeCollision(const Common::Vector3& oldpos);
-		void checkSoldierTreeCollision(const Common::Vector3& oldpos, const Tree& t);
-		void checkBulletTreeCollision(const Common::Vector3& oldpos, const Tree& t);
-
 		void checkLandCollision(const Common::Vector3& oldpos);
-		void checkSoldierLandCollision(const Common::Vector3& oldpos);
-		void checkBulletLandCollision(const Common::Vector3& oldpos);
 
 		Common::Vector3 mPosition;
 		Common::Vector3 mVelocity;
@@ -225,61 +246,25 @@ class PhysicsComponent {
 		float mMaxVel;
 		float mVelFriction;
 		float mFriction;
-		bool mBullet;
-		bool mActive;
 
-		static constexpr float BULLET_SLOWDOWN_PER_TREE_METER = 1000.0f;
+		friend class PhysicsCommon<SoldierPhysics>;
 };
 
-PhysicsComponent::PhysicsComponent(const WorldMap* wmap, float maxvel, float velfriction, float friction, bool bullet)
+SoldierPhysics::SoldierPhysics(const WorldMap* wmap, float maxvel, float velfriction, float friction)
 	: mAimPitch(0.0f),
 	mMap(wmap),
 	mMaxVel(maxvel),
 	mVelFriction(velfriction),
-	mFriction(friction),
-	mBullet(bullet),
-	mActive(true)
+	mFriction(friction)
 {
 }
 
-void PhysicsComponent::update(float dt)
+void SoldierPhysics::update(float dt)
 {
-	if(mBullet && mVelocity.length() < 1.0f) {
-		mActive = false;
-		return;
-	}
-
-	if(!mActive)
-		return;
-
-	mAcceleration.y -= 10.0f;
-	mVelocity += mAcceleration * dt;
-	if(mMaxVel) {
-		mVelocity.truncate(mMaxVel);
-	}
-
-	if(dt && mVelFriction) {
-		mAcceleration += mVelocity.normalized() * (1.0f - mVelFriction);
-	}
-
-	auto oldpos = mPosition;
-	mPosition += mVelocity * dt;
-	checkTreeCollision(oldpos);
-	checkLandCollision(oldpos);
-
-	mAcceleration = Common::Vector3();
+	PhysicsCommon<SoldierPhysics>::update(dt, *this);
 }
 
-void PhysicsComponent::checkLandCollision(const Common::Vector3& oldpos)
-{
-	if(mBullet) {
-		checkBulletLandCollision(oldpos);
-	} else {
-		checkSoldierLandCollision(oldpos);
-	}
-}
-
-void PhysicsComponent::checkSoldierLandCollision(const Common::Vector3& oldpos)
+void SoldierPhysics::checkLandCollision(const Common::Vector3& oldpos)
 {
 	float hgt = mMap->getHeightAt(mPosition.x, mPosition.z);
 	float ydiff = hgt - mPosition.y;
@@ -289,7 +274,88 @@ void PhysicsComponent::checkSoldierLandCollision(const Common::Vector3& oldpos)
 	}
 }
 
-void PhysicsComponent::checkBulletLandCollision(const Common::Vector3& oldpos)
+void SoldierPhysics::checkTreeCollision(const Common::Vector3& oldpos)
+{
+	for(const auto& t : mMap->getTreesAt(mPosition.x, mPosition.y, 5.0f)) {
+		auto rad = t.Radius * Tree::UNPASSABLE_COEFFICIENT;
+		auto rad2 = rad * rad;
+		if(t.Position.distance2(mPosition) < rad2) {
+			auto diff = (mPosition - t.Position).normalized();
+			auto newpos = t.Position + diff * rad;
+			mPosition = newpos;
+		}
+	}
+}
+
+void SoldierPhysics::addAcceleration(const Common::Vector3& vec)
+{
+	mAcceleration += vec;
+	mAcceleration.truncate(5.0f);
+}
+
+Common::Quaternion SoldierPhysics::getAimPitch() const
+{
+	return Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 0.0f, 1.0f), mAimPitch);
+}
+
+void SoldierPhysics::rotate(float yaw, float pitch)
+{
+	mOrientation = mOrientation *
+		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), yaw);
+	mAimPitch = Common::clamp<float>(-HALF_PI * 0.6f, mAimPitch + pitch, HALF_PI * 0.6f);
+}
+
+class BulletPhysics {
+	public:
+		BulletPhysics() = default;
+		BulletPhysics(const WorldMap* wmap, float maxvel, float velfriction, float friction);
+		void update(float dt);
+		const Common::Vector3& getPosition() const { return mPosition; }
+		const Common::Vector3& getVelocity() const { return mVelocity; }
+
+		void setPosition(const Common::Vector3& pos) { mPosition = pos; }
+		void setVelocity(const Common::Vector3& v) { mVelocity = v; }
+		bool isActive() const { return mActive; }
+
+	private:
+		void checkTreeCollision(const Common::Vector3& oldpos);
+		void checkLandCollision(const Common::Vector3& oldpos);
+
+		Common::Vector3 mPosition;
+		Common::Vector3 mVelocity;
+		Common::Vector3 mAcceleration;
+		const WorldMap* mMap;
+		float mMaxVel;
+		float mVelFriction;
+		float mFriction;
+		bool mActive;
+
+		static constexpr float BULLET_SLOWDOWN_PER_TREE_METER = 1000.0f;
+		friend class PhysicsCommon<BulletPhysics>;
+};
+
+BulletPhysics::BulletPhysics(const WorldMap* wmap, float maxvel, float velfriction, float friction)
+	: mMap(wmap),
+	mMaxVel(maxvel),
+	mVelFriction(velfriction),
+	mFriction(friction),
+	mActive(true)
+{
+}
+
+void BulletPhysics::update(float dt)
+{
+	if(mVelocity.length() < 1.0f) {
+		mActive = false;
+	}
+
+	if(!mActive)
+		return;
+
+	PhysicsCommon<BulletPhysics>::update(dt, *this);
+}
+
+void BulletPhysics::checkLandCollision(const Common::Vector3& oldpos)
 {
 	static constexpr float distBetweenSamples = 10.0f;
 	float fullDist = oldpos.distance(mPosition);
@@ -308,74 +374,39 @@ void PhysicsComponent::checkBulletLandCollision(const Common::Vector3& oldpos)
 	}
 }
 
-void PhysicsComponent::checkTreeCollision(const Common::Vector3& oldpos)
+void BulletPhysics::checkTreeCollision(const Common::Vector3& oldpos)
 {
-	auto func = mBullet ? &PhysicsComponent::checkBulletTreeCollision :
-		&PhysicsComponent::checkSoldierTreeCollision;
 	for(const auto& t : mMap->getTreesAt(mPosition.x, mPosition.y, 5.0f)) {
-		(this->*func)(oldpos, t);
-	}
-}
+		auto treeHeight = t.Position.y + t.Radius * Tree::HEIGHT_COEFFICIENT;
+		if(oldpos.y > treeHeight && mPosition.y > treeHeight)
+			return;
 
-void PhysicsComponent::checkSoldierTreeCollision(const Common::Vector3& oldpos, const Tree& t)
-{
-	auto rad = t.Radius * Tree::UNPASSABLE_COEFFICIENT;
-	auto rad2 = rad * rad;
-	if(t.Position.distance2(mPosition) < rad2) {
-		auto diff = (mPosition - t.Position).normalized();
-		auto newpos = t.Position + diff * rad;
-		mPosition = newpos;
-	}
-}
+		Common::Vector2 nearest;
+		Common::Vector2 oldpos2(oldpos.x, oldpos.z);
+		Common::Vector2 pos2(mPosition.x, mPosition.z);
+		auto dist = Common::Math::pointToSegmentDistance(oldpos2,
+				pos2,
+				Common::Vector2(t.Position.x, t.Position.z), &nearest);
+		auto rad = t.Radius * Tree::TRUNK_COEFFICIENT;
 
-void PhysicsComponent::checkBulletTreeCollision(const Common::Vector3& oldpos, const Tree& t)
-{
-	auto treeHeight = t.Position.y + t.Radius * Tree::HEIGHT_COEFFICIENT;
-	if(oldpos.y > treeHeight && mPosition.y > treeHeight)
-		return;
+		if(dist < rad) {
+			auto distTravelledInTrunk = rad - dist;
+			auto currSpeed = mVelocity.length();
+			auto speed = std::max<double>(0.0,
+					currSpeed - distTravelledInTrunk * BULLET_SLOWDOWN_PER_TREE_METER);
+			mVelocity = mVelocity.normalized() * speed;
 
-	Common::Vector2 nearest;
-	Common::Vector2 oldpos2(oldpos.x, oldpos.z);
-	Common::Vector2 pos2(mPosition.x, mPosition.z);
-	auto dist = Common::Math::pointToSegmentDistance(oldpos2,
-			pos2,
-			Common::Vector2(t.Position.x, t.Position.z), &nearest);
-	auto rad = t.Radius * Tree::TRUNK_COEFFICIENT;
-
-	if(dist < rad) {
-		auto distTravelledInTrunk = rad - dist;
-		auto currSpeed = mVelocity.length();
-		auto speed = std::max<double>(0.0,
-				currSpeed - distTravelledInTrunk * BULLET_SLOWDOWN_PER_TREE_METER);
-		mVelocity = mVelocity.normalized() * speed;
-
-		if(mVelocity.length() < 1.0f) {
-			auto distFromStartToImpact = oldpos2.distance(nearest);
-			auto distFromEndToImpact = pos2.distance(nearest);
-			auto distCoeff = distFromStartToImpact / (distFromStartToImpact + distFromEndToImpact);
-			auto newHeight = oldpos.y + distCoeff * (mPosition.y - oldpos.y);
-			mPosition = Common::Vector3(nearest.x, newHeight, nearest.y);
+			if(mVelocity.length() < 1.0f) {
+				auto distFromStartToImpact = oldpos2.distance(nearest);
+				auto distFromEndToImpact = pos2.distance(nearest);
+				auto distCoeff = distFromStartToImpact / (distFromStartToImpact + distFromEndToImpact);
+				auto newHeight = oldpos.y + distCoeff * (mPosition.y - oldpos.y);
+				mPosition = Common::Vector3(nearest.x, newHeight, nearest.y);
+			}
 		}
 	}
 }
 
-void PhysicsComponent::addAcceleration(const Common::Vector3& vec)
-{
-	mAcceleration += vec;
-	mAcceleration.truncate(5.0f);
-}
-
-Common::Quaternion PhysicsComponent::getAimPitch() const
-{
-	return Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 0.0f, 1.0f), mAimPitch);
-}
-
-void PhysicsComponent::rotate(float yaw, float pitch)
-{
-	mOrientation = mOrientation *
-		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), yaw);
-	mAimPitch = Common::clamp<float>(-HALF_PI * 0.6f, mAimPitch + pitch, HALF_PI * 0.6f);
-}
 
 struct Ray {
 	Common::Vector3 start;
@@ -385,18 +416,18 @@ struct Ray {
 class HittableComponent {
 	public:
 		HittableComponent() = default;
-		HittableComponent(const PhysicsComponent* phys, float radius);
+		HittableComponent(const SoldierPhysics* phys, float radius);
 		bool hit(const Ray& ray) const;
 		void die();
 		bool hasDied() const;
 
 	private:
-		const PhysicsComponent* mPhys;
+		const SoldierPhysics* mPhys;
 		float mRadius;
 		bool mDied;
 };
 
-HittableComponent::HittableComponent(const PhysicsComponent* phys, float radius)
+HittableComponent::HittableComponent(const SoldierPhysics* phys, float radius)
 	: mPhys(phys),
 	mRadius(radius),
 	mDied(false)
@@ -422,20 +453,20 @@ bool HittableComponent::hasDied() const
 class HitterComponent {
 	public:
 		HitterComponent() = default;
-		HitterComponent(const PhysicsComponent* phys, unsigned int shooterID);
+		HitterComponent(const BulletPhysics* phys, unsigned int shooterID);
 		void update(float dt);
 		Ray getLastRay() const;
 		bool isActive() const { return mPhys->isActive(); }
 		unsigned int getShooterID() const;
 
 	private:
-		const PhysicsComponent* mPhys;
+		const BulletPhysics* mPhys;
 		Common::Vector3 mPrevPos;
 		Common::Vector3 mThisPos;
 		unsigned int mShooterID;
 };
 
-HitterComponent::HitterComponent(const PhysicsComponent* phys, unsigned int shooterID)
+HitterComponent::HitterComponent(const BulletPhysics* phys, unsigned int shooterID)
 	: mPhys(phys),
 	mShooterID(shooterID)
 {
@@ -505,7 +536,7 @@ class Bullets {
 		std::vector<unsigned int> checkForHits(const std::vector<HittableComponent>& hittables);
 
 	private:
-		std::vector<PhysicsComponent> mPhysics;
+		std::vector<BulletPhysics> mPhysics;
 		std::vector<HitterComponent> mHitters;
 		std::vector<BulletRenderer> mRenders;
 		const WorldMap* mMap;
@@ -541,10 +572,9 @@ void Bullets::update(float dt)
 void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Quaternion& ori, unsigned int shooterID)
 {
 	assert(mNumBullets < MAX_BULLETS);
-	PhysicsComponent* ph = &mPhysics[mNumBullets];
-	*ph = PhysicsComponent(mMap, 0.0f, 0.99f, 0.0f, true);
+	BulletPhysics* ph = &mPhysics[mNumBullets];
+	*ph = BulletPhysics(mMap, 0.0f, 0.99f, 0.0f);
 	ph->setPosition(pos + Common::Vector3(0.0f, 1.7f, 0.0f));
-	ph->setOrientation(ori);
 	ph->setVelocity(Common::Math::rotate3D(Scene::WorldForward, ori) * 700.0f);
 
 	mHitters[mNumBullets] = HitterComponent(ph, shooterID);
@@ -574,19 +604,19 @@ std::vector<unsigned int> Bullets::checkForHits(const std::vector<HittableCompon
 
 class ShooterComponent {
 	public:
-		ShooterComponent(const PhysicsComponent* phys, Bullets* bullets, unsigned int shooterID);
+		ShooterComponent(const SoldierPhysics* phys, Bullets* bullets, unsigned int shooterID);
 		ShooterComponent() = default;
 		void shoot();
 		void update(float dt);
 
 	private:
-		const PhysicsComponent* mPhys;
+		const SoldierPhysics* mPhys;
 		Bullets* mBullets;
 		Weapon mWeapon;
 		unsigned int mShooterID;
 };
 
-ShooterComponent::ShooterComponent(const PhysicsComponent* phys, Bullets* bullets, unsigned int shooterID)
+ShooterComponent::ShooterComponent(const SoldierPhysics* phys, Bullets* bullets, unsigned int shooterID)
 	: mPhys(phys),
 	mBullets(bullets),
 	mShooterID(shooterID)
@@ -607,7 +637,7 @@ void ShooterComponent::update(float dt)
 
 class InputComponent {
 	public:
-		InputComponent(PhysicsComponent* phys, ShooterComponent* shooter, HittableComponent* hit, bool player);
+		InputComponent(SoldierPhysics* phys, ShooterComponent* shooter, HittableComponent* hit, bool player);
 		InputComponent() = default;
 		void update(float dt);
 		bool handleKeyDown(float frameTime, SDLKey key);
@@ -616,14 +646,14 @@ class InputComponent {
 		bool handleMousePress(float frameTime, Uint8 button);
 
 	private:
-		PhysicsComponent* mPhys;
+		SoldierPhysics* mPhys;
 		ShooterComponent* mShooter;
 		HittableComponent* mHittable;
 		bool mPlayer;
 		Common::Vector3 mInputAccel;
 };
 
-InputComponent::InputComponent(PhysicsComponent* phys, ShooterComponent* shooter, HittableComponent* hit, bool player)
+InputComponent::InputComponent(SoldierPhysics* phys, ShooterComponent* shooter, HittableComponent* hit, bool player)
 	: mPhys(phys),
 	mShooter(shooter),
 	mHittable(hit),
@@ -737,20 +767,20 @@ bool InputComponent::handleMousePress(float frameTime, Uint8 button)
 class RenderComponent {
 	public:
 		RenderComponent(Scene::Scene& scene,
-				const PhysicsComponent* phys,
+				const SoldierPhysics* phys,
 				const HittableComponent* hit,
 				unsigned int num);
 		RenderComponent() = default;
 		void update(float dt);
 
 	private:
-		const PhysicsComponent* mPhys;
+		const SoldierPhysics* mPhys;
 		const HittableComponent* mHit;
 		Scene::MeshInstance* mMesh;
 };
 
 RenderComponent::RenderComponent(Scene::Scene& scene,
-		const PhysicsComponent* phys,
+		const SoldierPhysics* phys,
 		const HittableComponent* hit,
 		unsigned int num)
 	: mPhys(phys),
@@ -788,7 +818,7 @@ class Soldiers {
 	private:
 		unsigned int mNumSoldiers;
 		std::vector<InputComponent> mInputs;
-		std::vector<PhysicsComponent> mPhysics;
+		std::vector<SoldierPhysics> mPhysics;
 		std::vector<RenderComponent> mRenders;
 		std::vector<ShooterComponent> mShooters;
 		std::vector<HittableComponent> mHittables;
@@ -831,7 +861,7 @@ void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
 
 	mPlayerSoldierIndex = 0;
 	for(int i = 0; i < numSoldiers; i++) {
-		mPhysics[i] = PhysicsComponent(wmap, 5.0f, 0.95f, 1.0f, false);
+		mPhysics[i] = SoldierPhysics(wmap, 5.0f, 0.95f, 1.0f);
 		mPhysics[i].setPosition(Common::Vector3(64.0f + rand() % 32 - 16, 0.0f, 64.0f + rand() % 32 - 16));
 		mShooters[i] = ShooterComponent(&mPhysics[i], bullets, i);
 		mHittables[i] = HittableComponent(&mPhysics[i], 1.5f);
