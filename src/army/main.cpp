@@ -233,6 +233,9 @@ class SoldierPhysics {
 		void setOrientation(const Common::Quaternion& ori) { mOrientation = ori; }
 		void setVelocity(const Common::Vector3& v) { mVelocity = v; }
 
+		void setAiming(bool a);
+		bool isAiming() const;
+
 	private:
 		void checkTreeCollision(const Common::Vector3& oldpos);
 		void checkLandCollision(const Common::Vector3& oldpos);
@@ -246,6 +249,7 @@ class SoldierPhysics {
 		float mMaxVel;
 		float mVelFriction;
 		float mFriction;
+		bool mAiming;
 
 		friend class PhysicsCommon<SoldierPhysics>;
 };
@@ -255,7 +259,8 @@ SoldierPhysics::SoldierPhysics(const WorldMap* wmap, float maxvel, float velfric
 	mMap(wmap),
 	mMaxVel(maxvel),
 	mVelFriction(velfriction),
-	mFriction(friction)
+	mFriction(friction),
+	mAiming(false)
 {
 }
 
@@ -289,6 +294,9 @@ void SoldierPhysics::checkTreeCollision(const Common::Vector3& oldpos)
 
 void SoldierPhysics::addAcceleration(const Common::Vector3& vec)
 {
+	if(mAiming)
+		return;
+
 	mAcceleration += vec;
 	mAcceleration.truncate(5.0f);
 }
@@ -303,6 +311,16 @@ void SoldierPhysics::rotate(float yaw, float pitch)
 	mOrientation = mOrientation *
 		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), yaw);
 	mAimPitch = Common::clamp<float>(-HALF_PI * 0.6f, mAimPitch + pitch, HALF_PI * 0.6f);
+}
+
+void SoldierPhysics::setAiming(bool a)
+{
+	mAiming = a;
+}
+
+bool SoldierPhysics::isAiming() const
+{
+	return mAiming;
 }
 
 class BulletPhysics {
@@ -749,7 +767,9 @@ bool InputComponent::handleMouseMotion(float frameTime, const SDL_MouseMotionEve
 	if(mHittable->hasDied())
 		return false;
 
-	mPhys->rotate(-ev.xrel * 0.02f, -ev.yrel * 0.02f);
+	const float coeff = mPhys->isAiming() ? 0.005f : 0.02f;
+
+	mPhys->rotate(-ev.xrel * coeff, -ev.yrel * coeff);
 	return false;
 }
 
@@ -760,6 +780,9 @@ bool InputComponent::handleMousePress(float frameTime, Uint8 button)
 
 	if(button == SDL_BUTTON_LEFT) {
 		mShooter->shoot();
+	} else if(button == SDL_BUTTON_RIGHT) {
+		auto a = mPhys->isAiming();
+		mPhys->setAiming(!a);
 	}
 	return false;
 }
@@ -811,6 +834,7 @@ class Soldiers {
 		void addSoldiers(const WorldMap* wmap, Bullets* bullets);
 		const Common::Vector3& getPlayerSoldierPosition() const;
 		Common::Quaternion getPlayerSoldierOrientation() const;
+		bool getPlayerSoldierAiming() const;
 		InputComponent& getPlayerInputComponent();
 		std::vector<HittableComponent> getHittables() const;
 		void processHits(const std::vector<unsigned int>& hits);
@@ -884,6 +908,11 @@ Common::Quaternion Soldiers::getPlayerSoldierOrientation() const
 	assert(mPlayerSoldierIndex < mNumSoldiers);
 
 	return mPhysics[mPlayerSoldierIndex].getOrientation() * mPhysics[mPlayerSoldierIndex].getAimPitch();
+}
+
+bool Soldiers::getPlayerSoldierAiming() const
+{
+	return mPhysics[mPlayerSoldierIndex].isAiming();
 }
 
 InputComponent& Soldiers::getPlayerInputComponent()
@@ -972,6 +1001,7 @@ void World::update(float dt)
 				Common::Vector3(0.0f, 1.7f, 0.0f) +
 				tgt.normalized() * 0.5f);
 		mCamera.lookAt(tgt, up);
+		mScene.setOverlayEnabled("Sight", mSoldiers.getPlayerSoldierAiming());
 	}
 }
 
@@ -1085,6 +1115,7 @@ AppDriver::AppDriver()
 	mScene.addTexture("Snow", "share/snow.jpg");
 	mScene.addTexture("Soldier", "share/soldier.jpg");
 	mScene.addTexture("Tree", "share/tree.png");
+	mScene.addOverlay("Sight", "share/sight.png");
 
 	mScene.getAmbientLight().setState(true);
 	mScene.getAmbientLight().setColor(Common::Color(127, 127, 127));
