@@ -12,6 +12,7 @@
 
 #include <common/Clock.h>
 #include <common/Math.h>
+#include <common/Random.h>
 #include <common/DriverFramework.h>
 
 class WindowFocus {
@@ -71,7 +72,7 @@ struct Tree {
 	Tree(const Common::Vector3& pos);
 	Common::Vector3 Position;
 	float Radius;
-	static constexpr float UNPASSABLE_COEFFICIENT = 0.5f;
+	static constexpr float UNPASSABLE_COEFFICIENT = 0.8f;
 	static constexpr float TRUNK_COEFFICIENT      = 0.1f;
 	static constexpr float HEIGHT_COEFFICIENT     = 2.0f;
 };
@@ -89,6 +90,7 @@ class WorldMap {
 		float getHeightAt(float x, float y) const;
 		std::vector<Tree> getTreesAt(float x, float y, float r) const;
 		Common::Vector3 getNormalAt(float x, float y) const;
+		bool lineBlockedByLand(const Common::Vector3& p1, const Common::Vector3& p2, Common::Vector3* hit) const;
 
 	private:
 		Scene::Scene& mScene;
@@ -153,6 +155,27 @@ Common::Vector3 WorldMap::getNormalAt(float x, float y) const
 	return v.cross(u).normalized();
 }
 
+bool WorldMap::lineBlockedByLand(const Common::Vector3& p1, const Common::Vector3& p2, Common::Vector3* hit) const
+{
+	float distBetweenSamples = std::max(1.0f, getHeightAt(p1.x, p1.z) - p1.y);
+	float fullDist = p1.distance(p2);
+	auto dir = (p2 - p1).normalized();
+
+	for(float sampleDist = 0.0f;
+			sampleDist < fullDist;
+			sampleDist += distBetweenSamples) {
+		auto samplePos = p1 + dir * sampleDist;
+		float hgt = getHeightAt(samplePos.x, samplePos.z);
+		if(hgt > samplePos.y) {
+			if(hit)
+				*hit = samplePos;
+			return true;
+		}
+		distBetweenSamples = std::max(1.0f, hgt - samplePos.y);
+	}
+	return false;
+}
+
 class Weapon {
 	public:
 		Weapon();
@@ -166,8 +189,8 @@ class Weapon {
 };
 
 Weapon::Weapon()
-	: mTimer(0.5f),
-	mBullets(10)
+	: mTimer(2.0f),
+	mBullets(100)
 {
 }
 
@@ -298,7 +321,7 @@ void SoldierPhysics::addAcceleration(const Common::Vector3& vec)
 		return;
 
 	mAcceleration += vec;
-	mAcceleration.truncate(5.0f);
+	mAcceleration.truncate(1.0f);
 }
 
 Common::Quaternion SoldierPhysics::getAimPitch() const
@@ -375,20 +398,10 @@ void BulletPhysics::update(float dt)
 
 void BulletPhysics::checkLandCollision(const Common::Vector3& oldpos)
 {
-	static constexpr float distBetweenSamples = 10.0f;
-	float fullDist = oldpos.distance(mPosition);
-	auto dir = (mPosition - oldpos).normalized();
-
-	for(float sampleDist = 0.0f;
-			sampleDist < fullDist;
-			sampleDist += distBetweenSamples) {
-		auto samplePos = oldpos + dir * sampleDist;
-		float hgt = mMap->getHeightAt(samplePos.x, samplePos.z);
-		if(hgt > samplePos.y) {
-			mPosition = samplePos;
-			mVelocity.zero();
-			break;
-		}
+	Common::Vector3 hitpoint;
+	if(mMap->lineBlockedByLand(oldpos, mPosition, &hitpoint)) {
+		mPosition = hitpoint;
+		mVelocity.zero();
 	}
 }
 
@@ -571,9 +584,9 @@ Bullets::Bullets(const WorldMap* wmap, Scene::Scene* scene)
 	mScene(scene),
 	mNumBullets(0)
 {
-	mPhysics.reserve(MAX_BULLETS);
-	mHitters.reserve(MAX_BULLETS);
-	mRenders.reserve(MAX_BULLETS);
+	mPhysics.resize(MAX_BULLETS);
+	mHitters.resize(MAX_BULLETS);
+	mRenders.resize(MAX_BULLETS);
 }
 
 void Bullets::update(float dt)
@@ -597,7 +610,12 @@ void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Qu
 	BulletPhysics* ph = &mPhysics[mNumBullets];
 	*ph = BulletPhysics(mMap, 0.0f, 0.99f, 0.0f);
 	ph->setPosition(pos + Common::Vector3(0.0f, 1.7f, 0.0f));
-	ph->setVelocity(Common::Math::rotate3D(Scene::WorldForward, ori) * 700.0f);
+	auto velvec = Common::Math::rotate3D(Scene::WorldForward, ori);
+	velvec.x += Common::Random::clamped() * 0.02f;
+	velvec.y += Common::Random::clamped() * 0.02f;
+	velvec.z += Common::Random::clamped() * 0.02f;
+	velvec.normalize();
+	ph->setVelocity(velvec * 700.0f);
 
 	mHitters[mNumBullets] = HitterComponent(ph, shooterID);
 	mRenders[mNumBullets] = BulletRenderer(mScene, &mHitters[mNumBullets]);
@@ -657,10 +675,225 @@ void ShooterComponent::update(float dt)
 	mWeapon.update(dt);
 }
 
-class InputComponent {
+class RenderComponent {
 	public:
-		InputComponent(SoldierPhysics* phys, ShooterComponent* shooter, HittableComponent* hit, bool player);
-		InputComponent() = default;
+		RenderComponent(Scene::Scene& scene,
+				const SoldierPhysics* phys,
+				const HittableComponent* hit,
+				unsigned int num);
+		RenderComponent() = default;
+		void update(float dt);
+
+	private:
+		const SoldierPhysics* mPhys;
+		const HittableComponent* mHit;
+		Scene::MeshInstance* mMesh;
+};
+
+RenderComponent::RenderComponent(Scene::Scene& scene,
+		const SoldierPhysics* phys,
+		const HittableComponent* hit,
+		unsigned int num)
+	: mPhys(phys),
+	mHit(hit)
+{
+	char name[256];
+	snprintf(name, 255, "Soldier%d", num);
+	mMesh = scene.addMeshInstance(name, "Soldier", "Soldier").get();
+}
+
+void RenderComponent::update(float dt)
+{
+	mMesh->setPosition(mPhys->getPosition());
+	if(mHit->hasDied()) {
+		// TODO: This could be animated
+		// TODO: The angle should correspond to the ground
+		mMesh->setRotation(mPhys->getOrientation() * Common::Quaternion(0.0f, 0.0f, sqrt(0.5f), sqrt(0.5f)));
+	} else {
+		mMesh->setRotation(mPhys->getOrientation());
+	}
+}
+
+class Soldiers {
+	public:
+		Soldiers(Scene::Scene& scene);
+		void update(float dt);
+		void addSoldiers(const WorldMap* wmap, Bullets* bullets);
+		const Common::Vector3& getPlayerSoldierPosition() const;
+		Common::Quaternion getPlayerSoldierOrientation() const;
+		bool getPlayerSoldierAiming() const;
+		SoldierPhysics* getPlayerPhysics();
+		ShooterComponent* getPlayerShooter();
+		HittableComponent* getPlayerHittable();
+		SoldierPhysics* getPhys(unsigned int i);
+		const SoldierPhysics* getPhys(unsigned int i) const;
+		const Common::Vector3& getSoldierPosition(unsigned int id) const;
+		ShooterComponent* getShooter(unsigned int i);
+		HittableComponent* getHittable(unsigned int i);
+		std::vector<HittableComponent> getHittables() const;
+		void processHits(const std::vector<unsigned int>& hits);
+		unsigned int getNumSoldiers() const;
+		unsigned int getPlayerSoldierIndex() const;
+		std::vector<unsigned int> getSoldiersAt(const Common::Vector3& pos, float radius) const;
+		bool soldierIsAlive(unsigned int i) const;
+
+		static const unsigned int MAX_SOLDIERS = 256;
+
+	private:
+		unsigned int mNumSoldiers;
+		std::vector<SoldierPhysics> mPhysics;
+		std::vector<RenderComponent> mRenders;
+		std::vector<ShooterComponent> mShooters;
+		std::vector<HittableComponent> mHittables;
+
+		Scene::Scene& mScene;
+		unsigned int mPlayerSoldierIndex;
+};
+
+Soldiers::Soldiers(Scene::Scene& scene)
+	: mNumSoldiers(0),
+	mScene(scene),
+	mPlayerSoldierIndex(0)
+{
+	mPhysics.resize(MAX_SOLDIERS);
+	mRenders.resize(MAX_SOLDIERS);
+	mShooters.resize(MAX_SOLDIERS);
+	mHittables.resize(MAX_SOLDIERS);
+}
+
+void Soldiers::update(float dt)
+{
+	for(unsigned int i = 0; i < mNumSoldiers; i++) {
+		mPhysics[i].update(dt);
+	}
+	for(unsigned int i = 0; i < mNumSoldiers; i++) {
+		mShooters[i].update(dt);
+	}
+	for(unsigned int i = 0; i < mNumSoldiers; i++) {
+		mRenders[i].update(dt);
+	}
+}
+
+void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
+{
+	const unsigned int numSoldiers = 10;
+
+	mPlayerSoldierIndex = 0;
+	for(unsigned int i = 0; i < numSoldiers; i++) {
+		mPhysics[i] = SoldierPhysics(wmap, 5.0f, 0.95f, 1.0f);
+		mPhysics[i].setPosition(Common::Vector3(64.0f + rand() % 128 - 64, 0.0f, 64.0f + rand() % 128 - 64));
+		mShooters[i] = ShooterComponent(&mPhysics[i], bullets, i);
+		mHittables[i] = HittableComponent(&mPhysics[i], 0.3f, 1.7f);
+		mRenders[i] = RenderComponent(mScene, &mPhysics[i], &mHittables[i], i);
+	}
+
+	mNumSoldiers = numSoldiers;
+}
+
+const Common::Vector3& Soldiers::getPlayerSoldierPosition() const
+{
+	assert(mPlayerSoldierIndex < mNumSoldiers);
+
+	return mPhysics[mPlayerSoldierIndex].getPosition();
+}
+
+Common::Quaternion Soldiers::getPlayerSoldierOrientation() const
+{
+	assert(mPlayerSoldierIndex < mNumSoldiers);
+
+	return mPhysics[mPlayerSoldierIndex].getOrientation() * mPhysics[mPlayerSoldierIndex].getAimPitch();
+}
+
+bool Soldiers::getPlayerSoldierAiming() const
+{
+	return mPhysics[mPlayerSoldierIndex].isAiming();
+}
+
+SoldierPhysics* Soldiers::getPlayerPhysics()
+{
+	return getPhys(mPlayerSoldierIndex);
+}
+
+ShooterComponent* Soldiers::getPlayerShooter()
+{
+	return getShooter(mPlayerSoldierIndex);
+}
+
+HittableComponent* Soldiers::getPlayerHittable()
+{
+	return getHittable(mPlayerSoldierIndex);
+}
+
+SoldierPhysics* Soldiers::getPhys(unsigned int i)
+{
+	assert(i < mNumSoldiers);
+	return &mPhysics[i];
+}
+
+const SoldierPhysics* Soldiers::getPhys(unsigned int i) const
+{
+	assert(i < mNumSoldiers);
+	return &mPhysics[i];
+}
+
+const Common::Vector3& Soldiers::getSoldierPosition(unsigned int id) const
+{
+	return getPhys(id)->getPosition();
+}
+
+ShooterComponent* Soldiers::getShooter(unsigned int i)
+{
+	assert(i < mNumSoldiers);
+	return &mShooters[i];
+}
+
+HittableComponent* Soldiers::getHittable(unsigned int i)
+{
+	assert(i < mNumSoldiers);
+	return &mHittables[i];
+}
+
+std::vector<HittableComponent> Soldiers::getHittables() const
+{
+	return std::vector<HittableComponent>(mHittables.begin(), mHittables.begin() + mNumSoldiers);
+}
+
+void Soldiers::processHits(const std::vector<unsigned int>& hits)
+{
+	for(auto i : hits) {
+		mHittables[i].die();
+	}
+}
+
+unsigned int Soldiers::getNumSoldiers() const
+{
+	return mNumSoldiers;
+}
+
+unsigned int Soldiers::getPlayerSoldierIndex() const
+{
+	return mPlayerSoldierIndex;
+}
+
+std::vector<unsigned int> Soldiers::getSoldiersAt(const Common::Vector3& pos, float radius) const
+{
+	// TODO: improve
+	std::vector<unsigned int> ret;
+	for(unsigned int i = 0; i < mNumSoldiers; i++) {
+		ret.push_back(i);
+	}
+	return ret;
+}
+
+bool Soldiers::soldierIsAlive(unsigned int i) const
+{
+	return !mHittables[i].hasDied();
+}
+
+class PlayerInput {
+	public:
+		PlayerInput() = default;
+		PlayerInput(Soldiers* soldiers);
 		void update(float dt);
 		bool handleKeyDown(float frameTime, SDLKey key);
 		bool handleKeyUp(float frameTime, SDLKey key);
@@ -671,33 +904,27 @@ class InputComponent {
 		SoldierPhysics* mPhys;
 		ShooterComponent* mShooter;
 		HittableComponent* mHittable;
-		bool mPlayer;
 		Common::Vector3 mInputAccel;
 };
 
-InputComponent::InputComponent(SoldierPhysics* phys, ShooterComponent* shooter, HittableComponent* hit, bool player)
-	: mPhys(phys),
-	mShooter(shooter),
-	mHittable(hit),
-	mPlayer(player)
+PlayerInput::PlayerInput(Soldiers* soldiers)
+	: mPhys(soldiers->getPlayerPhysics()),
+	mShooter(soldiers->getPlayerShooter()),
+	mHittable(soldiers->getPlayerHittable())
 {
 }
 
-void InputComponent::update(float dt)
+void PlayerInput::update(float dt)
 {
 	if(mHittable->hasDied())
 		return;
 
 	Common::Vector3 accel;
-	if(!mPlayer) {
-		accel = Common::Vector3(0.5f, 0.0f, 1.0f);
-	} else {
-		accel = Common::Math::rotate3D(mInputAccel, mPhys->getOrientation());
-	}
+	accel = Common::Math::rotate3D(mInputAccel, mPhys->getOrientation());
 	mPhys->addAcceleration(accel);
 }
 
-bool InputComponent::handleKeyDown(float frameTime, SDLKey key)
+bool PlayerInput::handleKeyDown(float frameTime, SDLKey key)
 {
 	switch(key) {
 		case SDLK_ESCAPE:
@@ -742,7 +969,7 @@ bool InputComponent::handleKeyDown(float frameTime, SDLKey key)
 	return false;
 }
 
-bool InputComponent::handleKeyUp(float frameTime, SDLKey key)
+bool PlayerInput::handleKeyUp(float frameTime, SDLKey key)
 {
 	switch(key) {
 		case SDLK_w:
@@ -766,7 +993,7 @@ bool InputComponent::handleKeyUp(float frameTime, SDLKey key)
 	return false;
 }
 
-bool InputComponent::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev)
+bool PlayerInput::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev)
 {
 	if(mHittable->hasDied())
 		return false;
@@ -777,7 +1004,7 @@ bool InputComponent::handleMouseMotion(float frameTime, const SDL_MouseMotionEve
 	return false;
 }
 
-bool InputComponent::handleMousePress(float frameTime, Uint8 button)
+bool PlayerInput::handleMousePress(float frameTime, Uint8 button)
 {
 	if(mHittable->hasDied())
 		return false;
@@ -791,158 +1018,261 @@ bool InputComponent::handleMousePress(float frameTime, Uint8 button)
 	return false;
 }
 
-class RenderComponent {
+class SoldierKnowledge {
 	public:
-		RenderComponent(Scene::Scene& scene,
-				const SoldierPhysics* phys,
-				const HittableComponent* hit,
-				unsigned int num);
-		RenderComponent() = default;
+		SoldierKnowledge(unsigned int id, const Common::Vector3& pos);
+		bool isCurrentlySeen() const { return mCurrentlySeen; }
+		const Common::Vector3& getPosition() const { return mLastKnownPosition; }
+		unsigned int getID() const { return mID; }
+
+	private:
+		Common::Vector3 mLastKnownPosition;
+		bool mCurrentlySeen;
+		unsigned int mID;
+};
+
+SoldierKnowledge::SoldierKnowledge(unsigned int id, const Common::Vector3& pos)
+	: mLastKnownPosition(pos),
+	mCurrentlySeen(true),
+	mID(id)
+{
+}
+
+class AISensor {
+	public:
+		AISensor() = default;
+		AISensor(const WorldMap* wmap, const Soldiers* soldiers, unsigned int id);
 		void update(float dt);
+		std::vector<SoldierKnowledge> getCurrentlySeenEnemies() const;
+		bool canSee(unsigned int id) const;
+
+	private:
+		const WorldMap* mMap;
+		const Soldiers* mSoldiers;
+		const SoldierPhysics* mPhys;
+		std::vector<SoldierKnowledge> mSensedSoldiers;
+		unsigned int mID;
+};
+
+AISensor::AISensor(const WorldMap* wmap, const Soldiers* soldiers, unsigned int id)
+	: mMap(wmap),
+	mSoldiers(soldiers),
+	mPhys(soldiers->getPhys(id)),
+	mID(id)
+{
+}
+
+void AISensor::update(float dt)
+{
+	mSensedSoldiers.clear();
+	for(auto& s : mSoldiers->getSoldiersAt(mPhys->getPosition(), 100.0f)) {
+		if(canSee(s) && mSoldiers->soldierIsAlive(s)) {
+			mSensedSoldiers.push_back(SoldierKnowledge(s, mSoldiers->getSoldierPosition(s)));
+		}
+	}
+}
+
+std::vector<SoldierKnowledge> AISensor::getCurrentlySeenEnemies() const
+{
+	std::vector<SoldierKnowledge> ret;
+	for(const auto& s : mSensedSoldiers) {
+		if(s.getID() != mID && s.isCurrentlySeen())
+			ret.push_back(s);
+	}
+	return ret;
+}
+
+bool AISensor::canSee(unsigned int id) const
+{
+	// TODO: take trees into account
+	return !mMap->lineBlockedByLand(mPhys->getPosition() + Common::Vector3(0.0f, 1.7f, 0.0f),
+			mSoldiers->getSoldierPosition(id) + Common::Vector3(0.0f, 1.65f, 0.0f),
+			nullptr);
+}
+
+class AITask {
+	public:
+		enum class Type {
+			Idle,
+			Move,
+			Shoot
+		};
+
+		Common::Vector3 Vec;
+		Type Type;
+};
+
+class AIPlanner {
+	public:
+		AIPlanner() = default;
+		AIPlanner(const SoldierPhysics* phys);
+		AITask getNextTask(const AISensor& sensor);
 
 	private:
 		const SoldierPhysics* mPhys;
-		const HittableComponent* mHit;
-		Scene::MeshInstance* mMesh;
 };
 
-RenderComponent::RenderComponent(Scene::Scene& scene,
-		const SoldierPhysics* phys,
-		const HittableComponent* hit,
-		unsigned int num)
-	: mPhys(phys),
-	mHit(hit)
+AIPlanner::AIPlanner(const SoldierPhysics* phys)
+	: mPhys(phys)
 {
-	char name[256];
-	snprintf(name, 255, "Soldier%d", num);
-	mMesh = scene.addMeshInstance(name, "Soldier", "Soldier").get();
 }
 
-void RenderComponent::update(float dt)
+AITask AIPlanner::getNextTask(const AISensor& sensor)
 {
-	mMesh->setPosition(mPhys->getPosition());
-	if(mHit->hasDied()) {
-		// TODO: This could be animated
-		// TODO: The angle should correspond to the ground
-		mMesh->setRotation(mPhys->getOrientation() * Common::Quaternion(0.0f, 0.0f, sqrt(0.5f), sqrt(0.5f)));
-	} else {
-		mMesh->setRotation(mPhys->getOrientation());
+	auto enemiesSeen = sensor.getCurrentlySeenEnemies();
+	if(enemiesSeen.size() > 0) {
+		auto mypos = mPhys->getPosition();
+		std::sort(enemiesSeen.begin(), enemiesSeen.end(), [&](const SoldierKnowledge& a, const SoldierKnowledge& b) {
+				return mypos.distance2(a.getPosition()) <
+				mypos.distance2(b.getPosition()); });
+		AITask t;
+		t.Type = AITask::Type::Shoot;
+		t.Vec = enemiesSeen[0].getPosition();
+		return t;
 	}
+
+	AITask t;
+	t.Type = AITask::Type::Move;
+	t.Vec = Common::Vector3(64.0f, 0.0f, 64.0f);
+	return t;
 }
 
-class Soldiers {
-	static const unsigned int MAX_SOLDIERS = 256;
+class AIActor {
 	public:
-		Soldiers(Scene::Scene& scene);
-		void update(float dt);
-		void addSoldiers(const WorldMap* wmap, Bullets* bullets);
-		const Common::Vector3& getPlayerSoldierPosition() const;
-		Common::Quaternion getPlayerSoldierOrientation() const;
-		bool getPlayerSoldierAiming() const;
-		InputComponent& getPlayerInputComponent();
-		std::vector<HittableComponent> getHittables() const;
-		void processHits(const std::vector<unsigned int>& hits);
+		AIActor() = default;
+		AIActor(SoldierPhysics* phys, ShooterComponent* shooter);
+		void execute(const AITask& t);
 
 	private:
-		unsigned int mNumSoldiers;
-		std::vector<InputComponent> mInputs;
-		std::vector<SoldierPhysics> mPhysics;
-		std::vector<RenderComponent> mRenders;
-		std::vector<ShooterComponent> mShooters;
-		std::vector<HittableComponent> mHittables;
-
-		Scene::Scene& mScene;
-		unsigned int mPlayerSoldierIndex;
+		SoldierPhysics* mPhys;
+		ShooterComponent* mShooter;
 };
 
-Soldiers::Soldiers(Scene::Scene& scene)
-	: mNumSoldiers(0),
-	mScene(scene),
-	mPlayerSoldierIndex(0)
+AIActor::AIActor(SoldierPhysics* phys, ShooterComponent* shooter)
+	: mPhys(phys),
+	mShooter(shooter)
 {
-	mInputs.reserve(MAX_SOLDIERS);
-	mPhysics.reserve(MAX_SOLDIERS);
-	mRenders.reserve(MAX_SOLDIERS);
-	mShooters.reserve(MAX_SOLDIERS);
-	mHittables.reserve(MAX_SOLDIERS);
 }
 
-void Soldiers::update(float dt)
+void AIActor::execute(const AITask& t)
 {
-	for(unsigned int i = 0; i < mNumSoldiers; i++) {
-		mInputs[i].update(dt);
+	switch(t.Type) {
+		case AITask::Type::Idle:
+			break;
+
+		case AITask::Type::Move:
+			{
+				Common::Vector3 accel;
+				accel = t.Vec - mPhys->getPosition();
+				accel.y = 0.0f;
+				if(accel.length() > 1.0f) {
+					mPhys->addAcceleration(accel);
+				}
+			}
+			break;
+
+		case AITask::Type::Shoot:
+			{
+				auto currdir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation() * mPhys->getAimPitch());
+				auto tgtvec = t.Vec - mPhys->getPosition();
+				auto curryaw = atan2(currdir.z, currdir.x);
+				auto tgtyaw = atan2(tgtvec.z, tgtvec.x);
+				auto currpitch = atan2(currdir.y, 1.0f);
+				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f);
+				auto diffyaw = curryaw - tgtyaw;
+				auto diffpitch = -(currpitch - tgtpitch);
+				mPhys->rotate(0.1f * diffyaw, 0.1f * diffpitch);
+				if(fabs(diffyaw) < 0.05f && fabs(diffpitch) < 0.05f) {
+					mShooter->shoot();
+				}
+				mPhys->addAcceleration(currdir);
+			}
+			break;
 	}
-	for(unsigned int i = 0; i < mNumSoldiers; i++) {
-		mPhysics[i].update(dt);
+}
+
+class AIComponent {
+	public:
+		AIComponent() = default;
+		AIComponent(const WorldMap* wmap, Soldiers* soldiers, unsigned int id);
+		void update(float dt);
+
+	private:
+		const Soldiers* mSoldiers;
+		AISensor mSensor;
+		AIPlanner mPlanner;
+		AIActor mActor;
+		SoldierPhysics* mPhys;
+		ShooterComponent* mShooter;
+		HittableComponent* mHittable;
+};
+
+AIComponent::AIComponent(const WorldMap* wmap, Soldiers* soldiers, unsigned int id)
+	: mSoldiers(soldiers),
+	mSensor(wmap, soldiers, id),
+	mPlanner(soldiers->getPhys(id)),
+	mActor(soldiers->getPhys(id), soldiers->getShooter(id)),
+	mPhys(soldiers->getPhys(id)),
+	mShooter(soldiers->getShooter(id)),
+	mHittable(soldiers->getHittable(id))
+{
+}
+
+void AIComponent::update(float dt)
+{
+	if(mHittable->hasDied())
+		return;
+
+	mSensor.update(dt);
+	auto task = mPlanner.getNextTask(mSensor);
+	mActor.execute(task);
+}
+
+class AI {
+	public:
+		AI() = default;
+		AI(const WorldMap* wmap, Soldiers* soldiers, const Bullets* bullets);
+		void init();
+		void update(float dt);
+
+	private:
+		const WorldMap* mMap;
+		Soldiers* mSoldiers;
+		const Bullets* mBullets;
+		std::vector<AIComponent> mAIs;
+		unsigned int mNumAIs;
+};
+
+AI::AI(const WorldMap* wmap, Soldiers* soldiers, const Bullets* bullets)
+	: mMap(wmap),
+	mSoldiers(soldiers),
+	mBullets(bullets)
+{
+	mAIs.resize(Soldiers::MAX_SOLDIERS);
+}
+
+void AI::init()
+{
+	mNumAIs = mSoldiers->getNumSoldiers();
+	for(unsigned int i = 0; i < mNumAIs; i++) {
+		mAIs[i] = AIComponent(mMap, mSoldiers, i);
 	}
-	for(unsigned int i = 0; i < mNumSoldiers; i++) {
-		mShooters[i].update(dt);
-	}
-	for(unsigned int i = 0; i < mNumSoldiers; i++) {
-		mRenders[i].update(dt);
-	}
 }
 
-void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
+void AI::update(float dt)
 {
-	const unsigned int numSoldiers = 10;
-
-	mPlayerSoldierIndex = 0;
-	for(int i = 0; i < numSoldiers; i++) {
-		mPhysics[i] = SoldierPhysics(wmap, 5.0f, 0.95f, 1.0f);
-		mPhysics[i].setPosition(Common::Vector3(64.0f + rand() % 32 - 16, 0.0f, 64.0f + rand() % 32 - 16));
-		mShooters[i] = ShooterComponent(&mPhysics[i], bullets, i);
-		mHittables[i] = HittableComponent(&mPhysics[i], 0.3f, 1.7f);
-		mInputs[i] = InputComponent(&mPhysics[i], &mShooters[i], &mHittables[i], i == mPlayerSoldierIndex);
-		mRenders[i] = RenderComponent(mScene, &mPhysics[i], &mHittables[i], i);
-	}
-
-	mNumSoldiers = numSoldiers;
-}
-
-const Common::Vector3& Soldiers::getPlayerSoldierPosition() const
-{
-	assert(mPlayerSoldierIndex < mNumSoldiers);
-
-	return mPhysics[mPlayerSoldierIndex].getPosition();
-}
-
-Common::Quaternion Soldiers::getPlayerSoldierOrientation() const
-{
-	assert(mPlayerSoldierIndex < mNumSoldiers);
-
-	return mPhysics[mPlayerSoldierIndex].getOrientation() * mPhysics[mPlayerSoldierIndex].getAimPitch();
-}
-
-bool Soldiers::getPlayerSoldierAiming() const
-{
-	return mPhysics[mPlayerSoldierIndex].isAiming();
-}
-
-InputComponent& Soldiers::getPlayerInputComponent()
-{
-	assert(mPlayerSoldierIndex < mNumSoldiers);
-
-	return mInputs[mPlayerSoldierIndex];
-}
-
-std::vector<HittableComponent> Soldiers::getHittables() const
-{
-	return std::vector<HittableComponent>(mHittables.begin(), mHittables.begin() + mNumSoldiers);
-}
-
-void Soldiers::processHits(const std::vector<unsigned int>& hits)
-{
-	for(auto i : hits) {
-		mHittables[i].die();
+	auto plid = mSoldiers->getPlayerSoldierIndex();
+	for(unsigned int i = 0; i < mNumAIs; i++) {
+		if(i != plid) {
+			mAIs[i].update(dt);
+		}
 	}
 }
 
 class World {
 	public:
 		World(Scene::Scene& scene);
-		void addSoldiers();
-		void createMap();
+		void init();
 		void update(float dt);
 		bool handleKeyDown(float frameTime, SDLKey key);
 		bool handleKeyUp(float frameTime, SDLKey key);
@@ -953,9 +1283,11 @@ class World {
 		WorldMap mMap;
 		Soldiers mSoldiers;
 		Bullets mBullets;
+		AI mAI;
 		Scene::Scene& mScene;
 		bool mObserverMode;
 		Scene::Camera& mCamera;
+		PlayerInput mPlayerInput;
 		std::map<SDLKey, std::function<void (float)>> mControls;
 };
 
@@ -975,14 +1307,13 @@ World::World(Scene::Scene& scene)
 	mControls[SDLK_a] = [&] (float p) { mCamera.setSidewaysMovement(-p); };
 }
 
-void World::addSoldiers()
-{
-	mSoldiers.addSoldiers(&mMap, &mBullets);
-}
-
-void World::createMap()
+void World::init()
 {
 	mMap.create();
+	mSoldiers.addSoldiers(&mMap, &mBullets);
+	mPlayerInput = PlayerInput(&mSoldiers);
+	mAI = AI(&mMap, &mSoldiers, &mBullets);
+	mAI.init();
 }
 
 void World::update(float dt)
@@ -991,6 +1322,8 @@ void World::update(float dt)
 		mCamera.applyMovementKeys(dt);
 
 	mSoldiers.update(dt);
+	mPlayerInput.update(dt);
+	mAI.update(dt);
 	mBullets.update(dt);
 
 	auto hits = mBullets.checkForHits(mSoldiers.getHittables());
@@ -1041,7 +1374,7 @@ bool World::handleKeyDown(float frameTime, SDLKey key)
 	if(mObserverMode) {
 		auto it = mControls.find(key);
 		if(it != mControls.end()) {
-			it->second(0.1f);
+			it->second(0.5f);
 			return false;
 		} else {
 			if(key == SDLK_ESCAPE) {
@@ -1050,7 +1383,7 @@ bool World::handleKeyDown(float frameTime, SDLKey key)
 		}
 		return false;
 	} else {
-		return mSoldiers.getPlayerInputComponent().handleKeyDown(frameTime, key);
+		return mPlayerInput.handleKeyDown(frameTime, key);
 	}
 }
 
@@ -1063,7 +1396,7 @@ bool World::handleKeyUp(float frameTime, SDLKey key)
 		}
 		return false;
 	} else {
-		return mSoldiers.getPlayerInputComponent().handleKeyUp(frameTime, key);
+		return mPlayerInput.handleKeyUp(frameTime, key);
 	}
 }
 
@@ -1075,7 +1408,7 @@ bool World::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev)
 		}
 		return false;
 	} else {
-		return mSoldiers.getPlayerInputComponent().handleMouseMotion(frameTime, ev);
+		return mPlayerInput.handleMouseMotion(frameTime, ev);
 	}
 }
 
@@ -1089,7 +1422,7 @@ bool World::handleMousePress(float frameTime, Uint8 button)
 	if(mObserverMode) {
 		return false;
 	} else {
-		return mSoldiers.getPlayerInputComponent().handleMousePress(frameTime, button);
+		return mPlayerInput.handleMousePress(frameTime, button);
 	}
 }
 
@@ -1113,7 +1446,6 @@ AppDriver::AppDriver()
 	mScene(800, 600),
 	mWorld(mScene)
 {
-	WindowFocus::setWindowFocus(true);
 	mScene.addModel("Soldier", "share/soldier.obj");
 	mScene.addModel("Tree", "share/tree.obj");
 	mScene.addTexture("Snow", "share/snow.jpg");
@@ -1128,8 +1460,8 @@ AppDriver::AppDriver()
 	mScene.getDirectionalLight().setDirection(Common::Vector3(0.5f, -1.0f, 0.5f));
 	mScene.getDirectionalLight().setColor(Common::Vector3(0.9f, 0.9f, 0.9f));
 
-	mWorld.createMap();
-	mWorld.addSoldiers();
+	mWorld.init();
+	WindowFocus::setWindowFocus(true);
 }
 
 bool AppDriver::handleKeyDown(float frameTime, SDLKey key)
