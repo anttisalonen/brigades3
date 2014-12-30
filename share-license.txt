@@ -1,0 +1,10 @@
+share/rifle.wav:
+	Author: Kibblesbob
+	Source: http://soundbible.com/1788-Sniper-Rifle.html
+	License: Public Domain
+
+All other files in the share directory:
+	Author: Antti Salonen
+	Source: Own work
+	License: CC Attribution-Share Alike 3.0 Unported - see http://creativecommons.org/licenses/by-sa/3.0/
+

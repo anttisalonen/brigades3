@@ -8,12 +8,86 @@
 #include <string.h>
 #include <assert.h>
 
+#include <SDL/SDL_mixer.h>
+
 #include <sscene/Scene.h>
 
 #include <common/Clock.h>
 #include <common/Math.h>
 #include <common/Random.h>
 #include <common/DriverFramework.h>
+
+class Sound {
+	public:
+		static void init();
+		static void play(const Common::Vector3& pos);
+		static void setCamera(const Common::Vector3& pos, const Common::Vector3& lookdir);
+
+	private:
+		static Mix_Chunk* mRifle;
+		static unsigned int mNextChannel;
+		static Common::Vector3 mCamPos;
+		static Common::Vector3 mCamLook;
+};
+
+Mix_Chunk* Sound::mRifle = nullptr;
+unsigned int Sound::mNextChannel = 0;
+Common::Vector3 Sound::mCamPos;
+Common::Vector3 Sound::mCamLook;
+
+void Sound::init()
+{
+	int flags=MIX_INIT_MP3;
+	int initted=Mix_Init(flags);
+	if((initted & flags) != flags) {
+		printf("Mix_Init: Failed to init required ogg and mod support!\n");
+		printf("Mix_Init: %s\n", Mix_GetError());
+		return;
+	}
+
+	// open 44.1KHz, signed 16bit, system byte order,
+	//      stereo audio, using 1024 byte chunks
+	if(Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024)==-1) {
+		printf("Mix_OpenAudio: %s\n", Mix_GetError());
+		return;
+	}
+
+	Mix_AllocateChannels(16);
+	mRifle = Mix_LoadWAV("share/rifle.wav");
+	if(!mRifle) {
+		printf("Couldn't load rifle sound!\n");
+	}
+}
+
+void Sound::play(const Common::Vector3& pos)
+{
+	if(!mRifle)
+		return;
+
+	unsigned int dist = static_cast<unsigned int>(mCamPos.distance(pos));
+	if(dist > 255)
+		return;
+
+	Common::Vector2 om(mCamLook.x, mCamLook.z);
+	if(om.null())
+		om.x = 1.0f;
+	Common::Vector2 oq(pos.x - mCamPos.x, pos.z - mCamPos.z);
+	unsigned int angle = 360 + Common::Math::radiansToDegrees(om.angleTo360(oq));
+	if(angle > 360)
+		angle -= 360;
+
+	Mix_SetPosition(mNextChannel, angle, static_cast<unsigned char>(dist));
+	if(Mix_PlayChannel(mNextChannel, mRifle, 0) == -1) {
+		printf("Mix_PlayMusic: %s\n", Mix_GetError());
+	}
+	mNextChannel = (mNextChannel + 1) % 16;
+}
+
+void Sound::setCamera(const Common::Vector3& pos, const Common::Vector3& lookdir)
+{
+	mCamPos = pos;
+	mCamLook = lookdir;
+}
 
 class WindowFocus {
 	public:
@@ -477,6 +551,7 @@ bool HittableComponent::hit(const Ray& ray) const
 
 void HittableComponent::die()
 {
+	std::cout << "Died!\n";
 	mDied = true;
 }
 
@@ -536,29 +611,44 @@ unsigned int HitterComponent::getShooterID() const
 class BulletRenderer {
 	public:
 		BulletRenderer();
-		BulletRenderer(Scene::Scene* scene, const HitterComponent* hit);
+		BulletRenderer(Scene::Scene* scene, const HitterComponent* hit, unsigned int id);
 		void update(float dt);
 
 	private:
 		Scene::Scene* mScene;
 		const HitterComponent* mHitter;
+		unsigned int mID;
+		std::string mName;
+		unsigned int mLineTicks;
 };
 
 BulletRenderer::BulletRenderer()
 {
 }
 
-BulletRenderer::BulletRenderer(Scene::Scene* scene, const HitterComponent* hit)
+BulletRenderer::BulletRenderer(Scene::Scene* scene, const HitterComponent* hit, unsigned int id)
 	: mScene(scene),
-	mHitter(hit)
+	mHitter(hit),
+	mLineTicks(0)
 {
+	std::stringstream ss;
+	ss << "Bullet line " << id;
+	mName = ss.str();
 }
 
 void BulletRenderer::update(float dt)
 {
 	auto r = mHitter->getLastRay();
 	if(mHitter->isActive()) {
-		mScene->addLine("Bullet line", r.start, r.end, Common::Color::Red);
+		mScene->addLine(mName, r.start, r.end, Common::Color::Red);
+		mLineTicks++;
+	} else if(mLineTicks) {
+		mLineTicks++;
+	}
+
+	if(mLineTicks > 5) {
+		mLineTicks = 0;
+		mScene->clearLine(mName);
 	}
 }
 
@@ -611,17 +701,18 @@ void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Qu
 	*ph = BulletPhysics(mMap, 0.0f, 0.99f, 0.0f);
 	ph->setPosition(pos + Common::Vector3(0.0f, 1.7f, 0.0f));
 	auto velvec = Common::Math::rotate3D(Scene::WorldForward, ori);
-	velvec.x += Common::Random::clamped() * 0.02f;
-	velvec.y += Common::Random::clamped() * 0.02f;
-	velvec.z += Common::Random::clamped() * 0.02f;
+	velvec.x += Common::Random::clamped() * 0.01f;
+	velvec.y += Common::Random::clamped() * 0.01f;
+	velvec.z += Common::Random::clamped() * 0.01f;
 	velvec.normalize();
 	ph->setVelocity(velvec * 700.0f);
 
 	mHitters[mNumBullets] = HitterComponent(ph, shooterID);
-	mRenders[mNumBullets] = BulletRenderer(mScene, &mHitters[mNumBullets]);
+	mRenders[mNumBullets] = BulletRenderer(mScene, &mHitters[mNumBullets], mNumBullets);
 
 	mNumBullets++;
 	weapon.shoot();
+	Sound::play(ph->getPosition() + velvec);
 }
 
 std::vector<unsigned int> Bullets::checkForHits(const std::vector<HittableComponent>& hittables)
@@ -776,7 +867,7 @@ void Soldiers::update(float dt)
 
 void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
 {
-	const unsigned int numSoldiers = 10;
+	const unsigned int numSoldiers = 4;
 
 	mPlayerSoldierIndex = 0;
 	for(unsigned int i = 0; i < numSoldiers; i++) {
@@ -899,18 +990,22 @@ class PlayerInput {
 		bool handleKeyUp(float frameTime, SDLKey key);
 		bool handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev);
 		bool handleMousePress(float frameTime, Uint8 button);
+		void changeFOV(float v);
+		float getFOV() const;
 
 	private:
 		SoldierPhysics* mPhys;
 		ShooterComponent* mShooter;
 		HittableComponent* mHittable;
 		Common::Vector3 mInputAccel;
+		float mFOV;
 };
 
 PlayerInput::PlayerInput(Soldiers* soldiers)
 	: mPhys(soldiers->getPlayerPhysics()),
 	mShooter(soldiers->getPlayerShooter()),
-	mHittable(soldiers->getPlayerHittable())
+	mHittable(soldiers->getPlayerHittable()),
+	mFOV(90.0f)
 {
 }
 
@@ -1014,8 +1109,22 @@ bool PlayerInput::handleMousePress(float frameTime, Uint8 button)
 	} else if(button == SDL_BUTTON_RIGHT) {
 		auto a = mPhys->isAiming();
 		mPhys->setAiming(!a);
+	} else if(button == SDL_BUTTON_WHEELUP) {
+		changeFOV(-5);
+	} else if(button == SDL_BUTTON_WHEELDOWN) {
+		changeFOV(5);
 	}
 	return false;
+}
+
+void PlayerInput::changeFOV(float v)
+{
+	mFOV = Common::clamp<float>(90.0f, mFOV + v, 120.0f);
+}
+
+float PlayerInput::getFOV() const
+{
+	return mFOV;
 }
 
 class SoldierKnowledge {
@@ -1176,13 +1285,13 @@ void AIActor::execute(const AITask& t)
 				auto currdir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation() * mPhys->getAimPitch());
 				auto tgtvec = t.Vec - mPhys->getPosition();
 				auto curryaw = atan2(currdir.z, currdir.x);
-				auto tgtyaw = atan2(tgtvec.z, tgtvec.x);
+				auto tgtyaw = atan2(tgtvec.z, tgtvec.x) + Common::Random::clamped() * 0.2f;
 				auto currpitch = atan2(currdir.y, 1.0f);
-				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f);
+				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f) + Common::Random::clamped() * 0.2f;
 				auto diffyaw = curryaw - tgtyaw;
 				auto diffpitch = -(currpitch - tgtpitch);
-				mPhys->rotate(0.1f * diffyaw, 0.1f * diffpitch);
-				if(fabs(diffyaw) < 0.05f && fabs(diffpitch) < 0.05f) {
+				mPhys->rotate(0.02f * diffyaw, 0.02f * diffpitch);
+				if(fabs(diffyaw) < 0.2f && fabs(diffpitch) < 0.2f) {
 					mShooter->shoot();
 				}
 				mPhys->addAcceleration(currdir);
@@ -1318,8 +1427,11 @@ void World::init()
 
 void World::update(float dt)
 {
-	if(mObserverMode)
+	if(mObserverMode) {
 		mCamera.applyMovementKeys(dt);
+		Sound::setCamera(mCamera.getPosition(), mCamera.getTargetVector());
+		mScene.setOverlayEnabled("Sight", false);
+	}
 
 	mSoldiers.update(dt);
 	mPlayerInput.update(dt);
@@ -1338,7 +1450,9 @@ void World::update(float dt)
 				Common::Vector3(0.0f, 1.7f, 0.0f) +
 				tgt.normalized() * 0.5f);
 		mCamera.lookAt(tgt, up);
+		Sound::setCamera(mCamera.getPosition(), mCamera.getTargetVector());
 		mScene.setOverlayEnabled("Sight", mSoldiers.getPlayerSoldierAiming());
+		mScene.setFOV(mPlayerInput.getFOV());
 	}
 }
 
@@ -1461,6 +1575,7 @@ AppDriver::AppDriver()
 	mScene.getDirectionalLight().setColor(Common::Vector3(0.9f, 0.9f, 0.9f));
 
 	mWorld.init();
+	Sound::init();
 	WindowFocus::setWindowFocus(true);
 }
 
