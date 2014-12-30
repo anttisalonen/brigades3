@@ -1174,9 +1174,16 @@ AISensor::AISensor(const WorldMap* wmap, const Soldiers* soldiers, unsigned int 
 void AISensor::update(float dt)
 {
 	mSensedSoldiers.clear();
-	for(auto& s : mSoldiers->getSoldiersAt(mPhys->getPosition(), 100.0f)) {
-		if(canSee(s) && mSoldiers->soldierIsAlive(s)) {
-			mSensedSoldiers.push_back(SoldierKnowledge(s, mSoldiers->getSoldierPosition(s)));
+	auto& mypos = mPhys->getPosition();
+	auto mydir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation());
+	for(auto& s : mSoldiers->getSoldiersAt(mypos, 100.0f)) {
+		if(s != mID && canSee(s) && mSoldiers->soldierIsAlive(s)) {
+			auto& othpos = mSoldiers->getSoldierPosition(s);
+			Common::Vector3 posdiff = othpos - mypos;
+			auto ang = Common::Vector2(posdiff.x, posdiff.z).angleTo(Common::Vector2(mydir.x, mydir.z));
+			if(ang < QUARTER_PI) {
+				mSensedSoldiers.push_back(SoldierKnowledge(s, othpos));
+			}
 		}
 	}
 }
@@ -1185,7 +1192,7 @@ std::vector<SoldierKnowledge> AISensor::getCurrentlySeenEnemies() const
 {
 	std::vector<SoldierKnowledge> ret;
 	for(const auto& s : mSensedSoldiers) {
-		if(s.getID() != mID && s.isCurrentlySeen())
+		if(s.isCurrentlySeen())
 			ret.push_back(s);
 	}
 	return ret;
