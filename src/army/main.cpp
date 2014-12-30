@@ -551,7 +551,8 @@ bool HittableComponent::hit(const Ray& ray) const
 
 void HittableComponent::die()
 {
-	std::cout << "Died!\n";
+	if(!mDied)
+		std::cout << "Died!\n";
 	mDied = true;
 }
 
