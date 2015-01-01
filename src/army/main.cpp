@@ -7,8 +7,12 @@
 
 #include <string.h>
 #include <assert.h>
+#include <float.h>
+#include <time.h>
 
 #include <SDL/SDL_mixer.h>
+
+#include <noise/noise.h>
 
 #include <sscene/Scene.h>
 
@@ -119,16 +123,21 @@ bool WindowFocus::getWindowFocus()
 
 class Heightmap : public Scene::Heightmap {
 	public:
-		Heightmap(std::function<float (float, float)> func);
+		Heightmap(unsigned int w, float xzscale, std::function<float (float, float)> func);
 		virtual float getHeightAt(float x, float y) const;
-		virtual float getWidth() const;
+		virtual unsigned int getWidth() const;
+		virtual float getXZScale() const;
 
 	private:
 		std::function<float (float, float)> mHeightFunc;
+		unsigned int mWidth;
+		float mXZScale;
 };
 
-Heightmap::Heightmap(std::function<float (float, float)> func)
-	: mHeightFunc(func)
+Heightmap::Heightmap(unsigned int w, float xzscale, std::function<float (float, float)> func)
+	: mHeightFunc(func),
+	mWidth(w),
+	mXZScale(xzscale)
 {
 }
 
@@ -137,13 +146,18 @@ float Heightmap::getHeightAt(float x, float y) const
 	return mHeightFunc(x, y);
 }
 
-float Heightmap::getWidth() const
+unsigned int Heightmap::getWidth() const
 {
-	return 128;
+	return mWidth;
+}
+
+float Heightmap::getXZScale() const
+{
+	return mXZScale;
 }
 
 struct Tree {
-	Tree(const Common::Vector3& pos);
+	Tree(const Common::Vector3& pos, float radius);
 	Common::Vector3 Position;
 	float Radius;
 	static constexpr float UNPASSABLE_COEFFICIENT = 0.8f;
@@ -151,9 +165,9 @@ struct Tree {
 	static constexpr float HEIGHT_COEFFICIENT     = 2.0f;
 };
 
-Tree::Tree(const Common::Vector3& pos)
+Tree::Tree(const Common::Vector3& pos, float radius)
 	: Position(pos),
-	Radius(1.0f)
+	Radius(radius)
 {
 }
 
@@ -165,12 +179,17 @@ class WorldMap {
 		std::vector<Tree> getTreesAt(float x, float y, float r) const;
 		Common::Vector3 getNormalAt(float x, float y) const;
 		bool lineBlockedByLand(const Common::Vector3& p1, const Common::Vector3& p2, Common::Vector3* hit) const;
+		float getWidth() const;
+		Common::Vector3 findFreeSpot(unsigned int tries, std::default_random_engine& gen) const;
 
 	private:
+		Common::Vector3 findFreeSpot(unsigned int tries);
+
 		Scene::Scene& mScene;
 		std::vector<Tree> mTrees;
 
 		std::default_random_engine mGen;
+		noise::module::Perlin mNoise;
 };
 
 WorldMap::WorldMap(Scene::Scene& scene)
@@ -178,33 +197,91 @@ WorldMap::WorldMap(Scene::Scene& scene)
 {
 }
 
+float WorldMap::getWidth() const
+{
+	return 256.0f;
+}
+
+Common::Vector3 WorldMap::findFreeSpot(unsigned int tries, std::default_random_engine& gen) const
+{
+	std::uniform_real_distribution<double> dis(0.0, getWidth());
+
+	for(unsigned int i = 0; i < tries; i++) {
+		float x = dis(gen);
+		float y = dis(gen);
+		auto pos = Common::Vector3(x, getHeightAt(x, y), y);
+		if(pos.y > 0.0f) {
+			return pos;
+		}
+	}
+	return Common::Vector3();
+}
+
+Common::Vector3 WorldMap::findFreeSpot(unsigned int tries)
+{
+	return findFreeSpot(tries, mGen);
+}
+
 void WorldMap::create()
 {
-	Heightmap hm([&] (float x, float y) { return getHeightAt(x, y); });
+	auto hmapconv = getWidth() / 128.0f;
+	Heightmap hm(128, hmapconv, [&] (float x, float y) { return getHeightAt(x, y); });
 	mScene.addModelFromHeightmap("Terrain", hm);
 	auto mi = mScene.addMeshInstance("Terrain", "Terrain", "Snow");
-	mi->setPosition(Common::Vector3(hm.getWidth() * 0.5f, 0.0f, hm.getWidth() * 0.5f));
 
-	std::uniform_real_distribution<double> treeDis(0.0, hm.getWidth());
+	std::uniform_real_distribution<double> radiusdis(2.0f, 5.0f);
+	std::uniform_real_distribution<double> rotatdis(0.0f, QUARTER_PI);
+
 	// TODO: Create a single mesh instance with all models instead
 	for(int i = 0; i < 500; i++) {
-		float x = treeDis(mGen);
-		float y = treeDis(mGen);
+		auto pos = findFreeSpot(1);
+		if(!pos.null()) {
+			float r = radiusdis(mGen);
+			float rot = rotatdis(mGen);
+			mTrees.push_back(Tree(pos, r));
 
-		auto pos = Common::Vector3(x, getHeightAt(x, y), y);
-		mTrees.push_back(Tree(pos));
+			char name[256];
+			snprintf(name, 255, "Tree%d", i);
 
-		char name[256];
-		snprintf(name, 255, "Tree%d", i);
-
-		auto treeInst = mScene.addMeshInstance(name, "Tree", "Tree", false, true);
-		treeInst->setPosition(pos);
+			auto treeInst = mScene.addMeshInstance(name, "Tree", "Tree", false, true);
+			treeInst->setPosition(pos);
+			treeInst->setScale(r, r, r);
+			treeInst->setRotationFromEuler(Common::Vector3(0.0f, rot, 0.0f));
+		}
 	}
+
+	mScene.addPlane("Sea", getWidth(), getWidth(), 16);
+	auto mi2 = mScene.addMeshInstance("Sea", "Sea", "Sea");
+	mi2->setPosition(Common::Vector3(-getWidth() / 2.0f, 0.0f, -getWidth() / 2.0f));
+	mi2->setScale(getWidth() * 2.0f, 1.0f, getWidth() * 2.0f);
 }
 
 float WorldMap::getHeightAt(float x, float y) const
 {
-	return 3.0f * sin(x * 0.20f) + 5.0f * cos(y * 0.10f) - 8.0f;
+	float w = getWidth();
+	if(x < 0 || x > w || y < 0 || y > w)
+		return -5.0f;
+
+	const float coast = 32.0f;
+	float cdiff = FLT_MAX;
+	if(x > w - coast)
+		cdiff = w - x;
+	if(x < coast)
+		cdiff = std::min(cdiff, x);
+	if(y > w - coast)
+		cdiff = std::min(cdiff, w - y);
+	if(y < coast)
+		cdiff = std::min(cdiff, y);
+
+	// TODO: lerp points sampled by gfx instead
+	float hval = ((mNoise.GetValue(x * 0.04f, 0.0, y * 0.04f) + 1.0f) * 0.5f) * 10.0f - 2.0f;
+
+	if(cdiff < coast) {
+		// lerp
+		return (-5.0f * (coast - cdiff) / coast) + (hval * cdiff / coast);
+	} else {
+		return hval;
+	}
 }
 
 std::vector<Tree> WorldMap::getTreesAt(float x, float y, float r) const
@@ -373,6 +450,13 @@ void SoldierPhysics::checkLandCollision(const Common::Vector3& oldpos)
 	if(ydiff > 0.0f) {
 		mPosition.y += ydiff;
 		mVelocity = mVelocity * mFriction;
+	}
+
+	if(hgt < -1.2f) {
+		auto oldhgt = mMap->getHeightAt(oldpos.x, oldpos.z);
+		if(oldhgt > hgt) {
+			mPosition = oldpos;
+		}
 	}
 }
 
@@ -640,10 +724,8 @@ BulletRenderer::BulletRenderer(Scene::Scene* scene, const HitterComponent* hit, 
 void BulletRenderer::update(float dt)
 {
 	auto r = mHitter->getLastRay();
-	if(mHitter->isActive()) {
+	if(mHitter->isActive() || (mLineTicks && r.start != r.end)) {
 		mScene->addLine(mName, r.start, r.end, Common::Color::Red);
-		mLineTicks++;
-	} else if(mLineTicks) {
 		mLineTicks++;
 	}
 
@@ -871,9 +953,14 @@ void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
 	const unsigned int numSoldiers = 4;
 
 	mPlayerSoldierIndex = 0;
+	std::default_random_engine gen((unsigned int)time(0));
 	for(unsigned int i = 0; i < numSoldiers; i++) {
 		mPhysics[i] = SoldierPhysics(wmap, 5.0f, 0.95f, 1.0f);
-		mPhysics[i].setPosition(Common::Vector3(64.0f + rand() % 128 - 64, 0.0f, 64.0f + rand() % 128 - 64));
+		auto pos = wmap->findFreeSpot(100, gen);
+		if(pos.null()) {
+			throw std::runtime_error("No space for a soldier in the world");
+		}
+		mPhysics[i].setPosition(pos);
 		mShooters[i] = ShooterComponent(&mPhysics[i], bullets, i);
 		mHittables[i] = HittableComponent(&mPhysics[i], 0.3f, 1.7f);
 		mRenders[i] = RenderComponent(mScene, &mPhysics[i], &mHittables[i], i);
@@ -1053,6 +1140,7 @@ bool PlayerInput::handleKeyDown(float frameTime, SDLKey key)
 		case SDLK_p:
 			{
 				std::cout << "Position: " << mPhys->getPosition() << "\n";
+				std::cout << "Velocity: " << mPhys->getVelocity() << "\n";
 				std::cout << "Orientation: " << mPhys->getOrientation() << "\n";
 				std::cout << "Aim pitch: " << mPhys->getAimPitch() << "\n";
 			}
@@ -1502,6 +1590,13 @@ bool World::handleKeyDown(float frameTime, SDLKey key)
 			if(key == SDLK_ESCAPE) {
 				return true;
 			}
+			else if(key == SDLK_p) {
+				std::cout << "Position: " << mCamera.getPosition() << "\n";
+			} else if(key == SDLK_F7) {
+				mScene.setWireframe(true);
+			} else if(key == SDLK_F8) {
+				mScene.setWireframe(false);
+			}
 		}
 		return false;
 	} else {
@@ -1525,9 +1620,7 @@ bool World::handleKeyUp(float frameTime, SDLKey key)
 bool World::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev)
 {
 	if(mObserverMode) {
-		if(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(1)) {
-			mCamera.rotate(-ev.xrel * 0.02f, -ev.yrel * 0.02f);
-		}
+		mCamera.rotate(-ev.xrel * 0.02f, -ev.yrel * 0.02f);
 		return false;
 	} else {
 		return mPlayerInput.handleMouseMotion(frameTime, ev);
@@ -1571,6 +1664,7 @@ AppDriver::AppDriver()
 	mScene.addModel("Soldier", "share/soldier.obj");
 	mScene.addModel("Tree", "share/tree.obj");
 	mScene.addTexture("Snow", "share/snow.jpg");
+	mScene.addTexture("Sea", "share/sea.jpg");
 	mScene.addTexture("Soldier", "share/soldier.jpg");
 	mScene.addTexture("Tree", "share/tree.png");
 	mScene.addOverlay("Sight", "share/sight.png");
@@ -1581,6 +1675,9 @@ AppDriver::AppDriver()
 	mScene.getDirectionalLight().setState(true);
 	mScene.getDirectionalLight().setDirection(Common::Vector3(0.5f, -1.0f, 0.5f));
 	mScene.getDirectionalLight().setColor(Common::Vector3(0.9f, 0.9f, 0.9f));
+
+	mScene.setZFar(1024.0f);
+	mScene.setClearColor(Common::Color(138, 163, 200));
 
 	mWorld.init();
 	Sound::init();
