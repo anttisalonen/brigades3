@@ -171,6 +171,277 @@ Tree::Tree(const Common::Vector3& pos, float radius)
 {
 }
 
+struct Ray {
+	Common::Vector3 start;
+	Common::Vector3 end;
+};
+
+class HouseWall {
+	public:
+		HouseWall(const Common::Vector2& start, const Common::Vector2& end, float halfwidth);
+		const Common::Vector2& getStart() const;
+		const Common::Vector2& getEnd() const;
+		float getWallHalfWidth() const;
+
+	private:
+		Common::Vector2 mStart;
+		Common::Vector2 mEnd;
+		float mWidth;
+};
+
+HouseWall::HouseWall(const Common::Vector2& start, const Common::Vector2& end, float width)
+	: mStart(start),
+	mEnd(end),
+	mWidth(width)
+{
+}
+
+const Common::Vector2& HouseWall::getStart() const
+{
+	return mStart;
+}
+
+const Common::Vector2& HouseWall::getEnd() const
+{
+	return mEnd;
+}
+
+float HouseWall::getWallHalfWidth() const
+{
+	return mWidth;
+}
+
+
+class House {
+	public:
+		House() { }
+		House(const Common::Vector3& p1,
+			const Common::Vector3& p2,
+			const Common::Vector3& p3,
+			const Common::Vector3& p4);
+		bool isInside(float x, float y) const;
+		float distanceTo(float x, float y) const;
+		const std::vector<HouseWall>& getWalls() const;
+		float getHouseFloorHeight() const;
+		float getHouseRoofHeight() const;
+		Common::Vector3 getCornerstonePosition() const;
+		std::pair<std::vector<Common::Vector3>, std::vector<Common::Vector3>> getVertexCoordsAndNormals() const;
+		std::vector<Common::Vector2> getTexCoords() const;
+		std::vector<unsigned int> getIndices() const;
+
+	private:
+		// TODO: allocate house walls from a contiguous array
+		std::vector<HouseWall> mWalls;
+		std::array<Common::Vector2, 4> mp;
+		float mFloor;
+		float mRoof;
+};
+
+House::House(const Common::Vector3& p1,
+		const Common::Vector3& p2,
+		const Common::Vector3& p3,
+		const Common::Vector3& p4)
+{
+	const float halfwidth = 0.25f;
+	mp[0] = Common::Vector2(p1.x, p1.z);
+	mp[1] = Common::Vector2(p2.x, p2.z);
+	mp[2] = Common::Vector2(p3.x, p3.z);
+	mp[3] = Common::Vector2(p4.x, p4.z);
+
+	// ensure the walls are attached together on the corners
+	auto ext0 = (mp[1] - mp[0]).normalized() * halfwidth;
+	auto ext1 = (mp[2] - mp[0]).normalized() * halfwidth;
+	auto ext2 = (mp[1] - mp[3]).normalized() * halfwidth;
+	auto ext3 = (mp[3] - mp[2]).normalized() * halfwidth;
+
+	mFloor = p1.y;
+	mRoof = mFloor + (rand() % 20 + 20) * 0.1f;
+
+	mWalls.push_back(HouseWall(mp[0] - ext0, mp[1] + ext0, halfwidth));
+	mWalls.push_back(HouseWall(mp[2] + ext1, mp[0] - ext1, halfwidth));
+	mWalls.push_back(HouseWall(mp[1] + ext2, mp[3] - ext2, halfwidth));
+	mWalls.push_back(HouseWall(mp[3] + ext3, mp[2] - ext3, halfwidth));
+}
+
+bool House::isInside(float x, float y) const
+{
+	Common::Vector2 p(x, y);
+	return Common::Math::isInsideTriangle(p, mp[0], mp[1], mp[2]) ||
+		Common::Math::isInsideTriangle(p, mp[2], mp[1], mp[3]);
+}
+
+float House::distanceTo(float x, float y) const
+{
+	if(isInside(x, y))
+		return 0.0f;
+	auto v = Common::Vector2(x, y);
+	auto dist = mp[0].distance2(v);
+	dist = std::min(dist, mp[1].distance2(v));
+	dist = std::min(dist, mp[2].distance2(v));
+	dist = std::min(dist, mp[3].distance2(v));
+	return sqrt(dist);
+}
+
+float House::getHouseFloorHeight() const
+{
+	return mFloor;
+}
+
+float House::getHouseRoofHeight() const
+{
+	return mRoof;
+}
+
+const std::vector<HouseWall>& House::getWalls() const
+{
+	return mWalls;
+}
+
+Common::Vector3 House::getCornerstonePosition() const
+{
+	return Common::Vector3(mp[0].x, mFloor, mp[0].y);
+}
+
+std::pair<std::vector<Common::Vector3>, std::vector<Common::Vector3>> House::getVertexCoordsAndNormals() const
+{
+	std::pair<std::vector<Common::Vector3>, std::vector<Common::Vector3>> ret;
+	auto roofHeight = mRoof - mFloor;
+
+	std::vector<Common::Vector3> roofverts;
+	std::vector<Common::Vector3> ceilverts;
+	std::vector<Common::Vector3> floorverts;
+
+	assert(mWalls.size() == 4); // due to roofverts & ceilverts
+
+	for(const auto& wall : mWalls) {
+		auto start = wall.getStart();
+		auto end = wall.getEnd();
+		auto halfwidth = wall.getWallHalfWidth();
+
+		std::vector<Common::Vector2> norms = {
+			Common::Math::rotate2D(end - start, HALF_PI).normalized() * halfwidth,
+			Common::Math::rotate2D(end - start, -HALF_PI).normalized() * halfwidth,
+		};
+
+		for(unsigned int i = 0; i < 2; i++) {
+			auto& norm = norms[i];
+			auto p1 = Common::Vector3(start.x - mp[0].x + norm.x,
+					0.0f,
+					start.y - mp[0].y + norm.y);
+			auto p2 = Common::Vector3(start.x - mp[0].x + norm.x,
+					roofHeight,
+					start.y - mp[0].y + norm.y);
+			auto p3 = Common::Vector3(end.x - mp[0].x + norm.x,
+					0.0f,
+					end.y - mp[0].y + norm.y);
+			auto p4 = Common::Vector3(end.x - mp[0].x + norm.x,
+					roofHeight,
+					end.y - mp[0].y + norm.y);
+			if(i == 0) {
+				ret.first.push_back(p3);
+				ret.first.push_back(p4);
+				ret.first.push_back(p1);
+				ret.first.push_back(p2);
+
+				ceilverts.push_back(p2 + Common::Vector3(0.0f, -0.1f, 0.0f));
+			} else {
+				ret.first.push_back(p1);
+				ret.first.push_back(p2);
+				ret.first.push_back(p3);
+				ret.first.push_back(p4);
+
+				roofverts.push_back(p4);
+				floorverts.push_back(p1);
+			}
+
+
+			auto normal = p1.cross(p2);
+			for(unsigned int i = 0; i < 4; i++) {
+				(void)i;
+				ret.second.push_back(normal);
+			}
+		}
+
+	}
+
+	for(unsigned int i = 0; i < 4; i++) {
+		ret.first.push_back(roofverts[i]);
+		ret.second.push_back(Common::Vector3(0.0f, 1.0f, 0.0f));
+	}
+
+	ret.first.push_back(ceilverts[0]);
+	ret.first.push_back(ceilverts[2]);
+	ret.first.push_back(ceilverts[1]);
+	ret.first.push_back(ceilverts[3]);
+	for(unsigned int i = 0; i < 4; i++) {
+		ret.second.push_back(Common::Vector3(0.0f, -1.0f, 0.0f));
+	}
+
+	for(unsigned int i = 0; i < 4; i++) {
+		ret.first.push_back(floorverts[i]);
+		ret.second.push_back(Common::Vector3(0.0f, 1.0f, 0.0f));
+	}
+
+	return ret;
+}
+
+std::vector<Common::Vector2> House::getTexCoords() const
+{
+	std::vector<Common::Vector2> ret;
+	for(const auto& wall : mWalls) {
+		(void)wall;
+		for(unsigned int i = 0; i < 2; i++) {
+			(void)i;
+			ret.push_back(Common::Vector2(0.0f, 0.0f));
+			ret.push_back(Common::Vector2(0.0f, 1.0f));
+			ret.push_back(Common::Vector2(1.0f, 0.0f));
+			ret.push_back(Common::Vector2(1.0f, 1.0f));
+		}
+	}
+
+	// roof, ceiling, floor
+	for(unsigned int i = 0; i < 3; i++) {
+		ret.push_back(Common::Vector2(0.0f, 0.0f));
+		ret.push_back(Common::Vector2(0.0f, 1.0f));
+		ret.push_back(Common::Vector2(1.0f, 0.0f));
+		ret.push_back(Common::Vector2(1.0f, 1.0f));
+	}
+
+	return ret;
+}
+
+std::vector<unsigned int> House::getIndices() const
+{
+	std::vector<unsigned int> ret;
+	unsigned int i = 0;
+	for(const auto& wall : mWalls) {
+		(void)wall;
+		for(unsigned int j = 0; j < 2; j++) {
+			(void)j;
+			ret.push_back(i);
+			ret.push_back(i + 1);
+			ret.push_back(i + 2);
+			ret.push_back(i + 2);
+			ret.push_back(i + 1);
+			ret.push_back(i + 3);
+			i += 4;
+		}
+	}
+
+	// roof, ceiling, floor
+	for(unsigned int j = 0; j < 3; j++) {
+		ret.push_back(i);
+		ret.push_back(i + 1);
+		ret.push_back(i + 2);
+		ret.push_back(i + 2);
+		ret.push_back(i + 1);
+		ret.push_back(i + 3);
+		i += 4;
+	}
+
+	return ret;
+}
+
 class WorldMap {
 	public:
 		WorldMap(Scene::Scene& scene);
@@ -181,15 +452,23 @@ class WorldMap {
 		bool lineBlockedByLand(const Common::Vector3& p1, const Common::Vector3& p2, Common::Vector3* hit) const;
 		float getWidth() const;
 		Common::Vector3 findFreeSpot(unsigned int tries, std::default_random_engine& gen) const;
+		const std::vector<House>& getHousesAt(float x, float y, float r) const;
+		Common::Vector3 pointToVec(float x, float y) const;
 
 	private:
+		void addHouses();
+		void addTrees();
 		Common::Vector3 findFreeSpot(unsigned int tries);
+		bool nearHouse(float x, float y, float radius, House* house) const;
+		bool isFreeSpot(float x, float y) const;
 
 		Scene::Scene& mScene;
 		std::vector<Tree> mTrees;
 
 		std::default_random_engine mGen;
 		noise::module::Perlin mNoise;
+
+		std::vector<House> mHouses;
 };
 
 WorldMap::WorldMap(Scene::Scene& scene)
@@ -202,6 +481,11 @@ float WorldMap::getWidth() const
 	return 256.0f;
 }
 
+bool WorldMap::isFreeSpot(float x, float y) const
+{
+	return getHeightAt(x, y) > 0.0f && !nearHouse(x, y, 10.0f, nullptr);
+}
+
 Common::Vector3 WorldMap::findFreeSpot(unsigned int tries, std::default_random_engine& gen) const
 {
 	std::uniform_real_distribution<double> dis(0.0, getWidth());
@@ -209,9 +493,8 @@ Common::Vector3 WorldMap::findFreeSpot(unsigned int tries, std::default_random_e
 	for(unsigned int i = 0; i < tries; i++) {
 		float x = dis(gen);
 		float y = dis(gen);
-		auto pos = Common::Vector3(x, getHeightAt(x, y), y);
-		if(pos.y > 0.0f) {
-			return pos;
+		if(isFreeSpot(x, y)) {
+			return pointToVec(x, y);
 		}
 	}
 	return Common::Vector3();
@@ -222,13 +505,114 @@ Common::Vector3 WorldMap::findFreeSpot(unsigned int tries)
 	return findFreeSpot(tries, mGen);
 }
 
+bool WorldMap::nearHouse(float x, float y, float radius, House* house) const
+{
+	// NOTE: radius must be more than half of maximum house wall length
+	for(const auto& h : getHousesAt(x, y, radius)) {
+		if(h.distanceTo(x, y) < radius) {
+			if(house)
+				*house = h;
+			return true;
+		}
+	}
+	return false;
+}
+
 void WorldMap::create()
 {
+	addHouses();
+	addTrees();
+
 	auto hmapconv = getWidth() / 128.0f;
 	Heightmap hm(128, hmapconv, [&] (float x, float y) { return getHeightAt(x, y); });
 	mScene.addModelFromHeightmap("Terrain", hm);
 	auto mi = mScene.addMeshInstance("Terrain", "Terrain", "Snow");
 
+	mScene.addPlane("Sea", getWidth(), getWidth(), 16);
+	auto mi2 = mScene.addMeshInstance("Sea", "Sea", "Sea");
+	mi2->setPosition(Common::Vector3(-getWidth() / 2.0f, 0.0f, -getWidth() / 2.0f));
+	mi2->setScale(getWidth() * 2.0f, 1.0f, getWidth() * 2.0f);
+}
+
+Common::Vector3 WorldMap::pointToVec(float x, float y) const
+{
+	return Common::Vector3(x, getHeightAt(x, y), y);
+}
+
+
+void WorldMap::addHouses()
+{
+	for(int i = 0; i < 50; i++) {
+		Common::Vector3 cornerstone = findFreeSpot(100);
+		if(cornerstone.null())
+			break;
+
+		std::uniform_real_distribution<double> wallLengthDis(5.0f, 15.0f);
+		auto corner2x = wallLengthDis(mGen);
+		auto corner2z = wallLengthDis(mGen);
+		auto corner2 = pointToVec(cornerstone.x + corner2x,
+				cornerstone.z + corner2z);
+
+		if(!isFreeSpot(corner2.x, corner2.z)) {
+			continue;
+		}
+
+		auto corner3_2d = Common::Math::rotate2D(Common::Vector2(corner2x,
+					corner2z), HALF_PI);
+
+		auto corner3x = wallLengthDis(mGen);
+
+		corner3_2d = corner3_2d.normalized() * corner3x;
+		Common::Vector3 corner3_rel(corner3_2d.x, 0.0f, corner3_2d.y);
+		Common::Vector3 corner3 = corner3_rel + cornerstone;
+		if(!isFreeSpot(corner3.x, corner3.z)) {
+			continue;
+		}
+		corner3.y = getHeightAt(corner3.x, corner3.z);
+
+		Common::Vector3 corner4 = corner2 + corner3_rel;
+		if(!isFreeSpot(corner4.x, corner4.z)) {
+			continue;
+		}
+		corner4.y = getHeightAt(corner4.x, corner4.z);
+
+		auto minmaxheights = std::minmax({cornerstone.y,
+				corner2.y, corner3.y,
+				corner4.y});
+
+		if(minmaxheights.second - minmaxheights.first > 1.0f) {
+			continue;
+		}
+
+		if(minmaxheights.first < 1.0f) {
+			continue;
+		}
+
+		cornerstone.y = corner2.y = corner4.y = minmaxheights.first;
+
+		auto house = House(cornerstone, corner2,
+				corner3,
+				corner4);
+		mHouses.push_back(house);
+	}
+
+	for(unsigned int i = 0; i < mHouses.size(); i++) {
+		std::stringstream ss;
+		ss << "House " << i << "\n";
+		std::string hname = ss.str();
+		auto vpair = mHouses[i].getVertexCoordsAndNormals();
+		auto texcoords = mHouses[i].getTexCoords();
+		auto indices = mHouses[i].getIndices();
+		mScene.addModel(hname, vpair.first, texcoords, indices, vpair.second);
+		auto mi = mScene.addMeshInstance(hname, hname, "House");
+		auto cp = mHouses[i].getCornerstonePosition();
+		std::cout << "Cornerstone at " << cp << "\n";
+		mi->setPosition(cp);
+	}
+}
+
+void WorldMap::addTrees()
+{
 	std::uniform_real_distribution<double> radiusdis(2.0f, 5.0f);
 	std::uniform_real_distribution<double> rotatdis(0.0f, QUARTER_PI);
 
@@ -249,11 +633,6 @@ void WorldMap::create()
 			treeInst->setRotationFromEuler(Common::Vector3(0.0f, rot, 0.0f));
 		}
 	}
-
-	mScene.addPlane("Sea", getWidth(), getWidth(), 16);
-	auto mi2 = mScene.addMeshInstance("Sea", "Sea", "Sea");
-	mi2->setPosition(Common::Vector3(-getWidth() / 2.0f, 0.0f, -getWidth() / 2.0f));
-	mi2->setScale(getWidth() * 2.0f, 1.0f, getWidth() * 2.0f);
 }
 
 float WorldMap::getHeightAt(float x, float y) const
@@ -261,6 +640,13 @@ float WorldMap::getHeightAt(float x, float y) const
 	float w = getWidth();
 	if(x < 0 || x > w || y < 0 || y > w)
 		return -5.0f;
+
+	{
+		House house;
+		if(nearHouse(x, y, 8.0f, &house)) {
+			return house.getHouseFloorHeight() - 0.05f;
+		}
+	}
 
 	const float coast = 32.0f;
 	float cdiff = FLT_MAX;
@@ -274,7 +660,7 @@ float WorldMap::getHeightAt(float x, float y) const
 		cdiff = std::min(cdiff, y);
 
 	// TODO: lerp points sampled by gfx instead
-	float hval = ((mNoise.GetValue(x * 0.04f, 0.0, y * 0.04f) + 1.0f) * 0.5f) * 10.0f - 2.0f;
+	float hval = ((mNoise.GetValue(x * 0.01f, 0.0, y * 0.01f) + 1.0f) * 0.5f) * 10.0f - 2.0f;
 
 	if(cdiff < coast) {
 		// lerp
@@ -290,17 +676,16 @@ std::vector<Tree> WorldMap::getTreesAt(float x, float y, float r) const
 	return mTrees;
 }
 
+const std::vector<House>& WorldMap::getHousesAt(float x, float y, float r) const
+{
+	return mHouses;
+}
+
 Common::Vector3 WorldMap::getNormalAt(float x, float y) const
 {
-	Common::Vector3 p1(x,
-			getHeightAt(x, y),
-			y);
-	Common::Vector3 p2(x + 0.5f,
-			getHeightAt(x + 0.5f, y),
-			y);
-	Common::Vector3 p3(x,
-			getHeightAt(x, y + 0.5f),
-			y + 0.5f);
+	Common::Vector3 p1 = pointToVec(x, y);
+	Common::Vector3 p2 = pointToVec(x + 0.5f, y);
+	Common::Vector3 p3 = pointToVec(x, y + 0.5f);
 	Common::Vector3 u(p2 - p1);
 	Common::Vector3 v(p3 - p1);
 	return v.cross(u).normalized();
@@ -387,6 +772,7 @@ void PhysicsCommon<Physics>::update(float dt, Physics& p)
 	p.mPosition += p.mVelocity * dt;
 	p.checkTreeCollision(oldpos);
 	p.checkLandCollision(oldpos);
+	p.checkWallCollision(oldpos);
 
 	p.mAcceleration = Common::Vector3();
 }
@@ -413,6 +799,7 @@ class SoldierPhysics {
 	private:
 		void checkTreeCollision(const Common::Vector3& oldpos);
 		void checkLandCollision(const Common::Vector3& oldpos);
+		void checkWallCollision(const Common::Vector3& oldpos);
 
 		Common::Vector3 mPosition;
 		Common::Vector3 mVelocity;
@@ -462,13 +849,56 @@ void SoldierPhysics::checkLandCollision(const Common::Vector3& oldpos)
 
 void SoldierPhysics::checkTreeCollision(const Common::Vector3& oldpos)
 {
-	for(const auto& t : mMap->getTreesAt(mPosition.x, mPosition.y, 5.0f)) {
+	for(const auto& t : mMap->getTreesAt(mPosition.x, mPosition.z, 5.0f)) {
 		auto rad = t.Radius * Tree::UNPASSABLE_COEFFICIENT;
 		auto rad2 = rad * rad;
 		if(t.Position.distance2(mPosition) < rad2) {
 			auto diff = (mPosition - t.Position).normalized();
 			auto newpos = t.Position + diff * rad;
 			mPosition = newpos;
+		}
+	}
+}
+
+void SoldierPhysics::checkWallCollision(const Common::Vector3& oldpos)
+{
+	auto travdist = oldpos.distance(mPosition);
+	for(const auto& house : mMap->getHousesAt(mPosition.x, mPosition.z, 5.0f)) {
+		for(const auto& wall : house.getWalls()) {
+			const auto& rs = wall.getStart();
+			const auto& re = wall.getEnd();
+			float width = wall.getWallHalfWidth();
+			Common::Vector2 mp = Common::Vector2(mPosition.x, mPosition.z);
+			Common::Vector2 op = Common::Vector2(oldpos.x, oldpos.z);
+
+			Common::Vector2 nearest;
+
+			auto dist = Common::Math::pointToSegmentDistance(
+					rs,
+					re,
+					mp, &nearest);
+			if(dist < width + 0.5f) {
+				// soldier is within wall
+				std::cout << "Soldier is within wall\n";
+				auto vecFromWall = op +
+					(op - nearest).normalized() * (width + 0.5f);
+				mPosition = mMap->pointToVec(vecFromWall.x, vecFromWall.y);
+			} else if(travdist > width) {
+				// not within wall but possibly tunneled
+				bool found;
+				auto v = Common::Math::segmentSegmentIntersection2D(
+						rs,
+						re,
+						op,
+						mp,
+						&found);
+				if(found) {
+					std::cout << "Soldier tunneled through wall " << rs << "\t" << re << "\n";
+					std::cout << "Dist: " << dist << "\toldpos: " << op << "\t" << mp << "\n";
+					std::cout << "v: " << v << "\n";
+					mPosition = oldpos;
+				}
+			}
 		}
 	}
 }
@@ -519,6 +949,7 @@ class BulletPhysics {
 	private:
 		void checkTreeCollision(const Common::Vector3& oldpos);
 		void checkLandCollision(const Common::Vector3& oldpos);
+		void checkWallCollision(const Common::Vector3& oldpos);
 
 		Common::Vector3 mPosition;
 		Common::Vector3 mVelocity;
@@ -563,9 +994,34 @@ void BulletPhysics::checkLandCollision(const Common::Vector3& oldpos)
 	}
 }
 
+void BulletPhysics::checkWallCollision(const Common::Vector3& oldpos)
+{
+	for(const auto& house : mMap->getHousesAt(mPosition.x, mPosition.z, oldpos.distance(mPosition) + 5.0f)) {
+		for(const auto& wall : house.getWalls()) {
+			const auto& rs = wall.getStart();
+			const auto& re = wall.getEnd();
+			Common::Vector2 mp = Common::Vector2(mPosition.x, mPosition.z);
+			Common::Vector2 op = Common::Vector2(oldpos.x, oldpos.z);
+
+			bool found;
+			auto hitpoint = Common::Math::segmentSegmentIntersection2D(
+					rs,
+					re,
+					op,
+					mp,
+					&found);
+			if(found) {
+				mPosition = mMap->pointToVec(hitpoint.x, hitpoint.y);
+				mVelocity.zero();
+				break;
+			}
+		}
+	}
+}
+
 void BulletPhysics::checkTreeCollision(const Common::Vector3& oldpos)
 {
-	for(const auto& t : mMap->getTreesAt(mPosition.x, mPosition.y, 5.0f)) {
+	for(const auto& t : mMap->getTreesAt(mPosition.x, mPosition.z, 5.0f)) {
 		auto treeHeight = t.Position.y + t.Radius * Tree::HEIGHT_COEFFICIENT;
 		if(oldpos.y > treeHeight && mPosition.y > treeHeight)
 			return;
@@ -596,11 +1052,6 @@ void BulletPhysics::checkTreeCollision(const Common::Vector3& oldpos)
 	}
 }
 
-
-struct Ray {
-	Common::Vector3 start;
-	Common::Vector3 end;
-};
 
 class HittableComponent {
 	public:
@@ -950,7 +1401,7 @@ void Soldiers::update(float dt)
 
 void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
 {
-	const unsigned int numSoldiers = 4;
+	const unsigned int numSoldiers = 8;
 
 	mPlayerSoldierIndex = 0;
 	std::default_random_engine gen((unsigned int)time(0));
@@ -1665,6 +2116,7 @@ AppDriver::AppDriver()
 	mScene.addModel("Tree", "share/tree.obj");
 	mScene.addTexture("Snow", "share/snow.jpg");
 	mScene.addTexture("Sea", "share/sea.jpg");
+	mScene.addTexture("House", "share/house.jpg");
 	mScene.addTexture("Soldier", "share/soldier.jpg");
 	mScene.addTexture("Tree", "share/tree.png");
 	mScene.addOverlay("Sight", "share/sight.png");
