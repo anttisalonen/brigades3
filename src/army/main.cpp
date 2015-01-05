@@ -160,9 +160,11 @@ struct Tree {
 	Tree(const Common::Vector3& pos, float radius);
 	Common::Vector3 Position;
 	float Radius;
-	static constexpr float UNPASSABLE_COEFFICIENT = 0.8f;
-	static constexpr float TRUNK_COEFFICIENT      = 0.1f;
-	static constexpr float HEIGHT_COEFFICIENT     = 2.0f;
+	static constexpr float UNPASSABLE_COEFFICIENT   = 0.6f;
+	static constexpr float UNSEETHROUGH_COEFFICIENT = 0.9f;
+	static constexpr float TRUNK_COEFFICIENT        = 0.1f;
+	static constexpr float HEIGHT_COEFFICIENT       = 2.0f;
+	static constexpr float BULLET_SLOWDOWN_PER_TREE_METER = 1000.0f;
 };
 
 Tree::Tree(const Common::Vector3& pos, float radius)
@@ -178,21 +180,29 @@ struct Ray {
 
 class HouseWall {
 	public:
-		HouseWall(const Common::Vector2& start, const Common::Vector2& end, float halfwidth);
+		HouseWall(const Common::Vector2& start, const Common::Vector2& end, float halfwidth,
+				float windowpos, float doorpos);
 		const Common::Vector2& getStart() const;
 		const Common::Vector2& getEnd() const;
 		float getWallHalfWidth() const;
+		float getWindowPosition() const;
+		float getDoorPosition() const;
 
 	private:
 		Common::Vector2 mStart;
 		Common::Vector2 mEnd;
 		float mWidth;
+		float mWindowPos;
+		float mDoorPos;
 };
 
-HouseWall::HouseWall(const Common::Vector2& start, const Common::Vector2& end, float width)
+HouseWall::HouseWall(const Common::Vector2& start, const Common::Vector2& end, float width,
+		float windowpos, float doorpos)
 	: mStart(start),
 	mEnd(end),
-	mWidth(width)
+	mWidth(width),
+	mWindowPos(windowpos),
+	mDoorPos(doorpos)
 {
 }
 
@@ -211,14 +221,32 @@ float HouseWall::getWallHalfWidth() const
 	return mWidth;
 }
 
+float HouseWall::getWindowPosition() const
+{
+	return mWindowPos;
+}
+
+float HouseWall::getDoorPosition() const
+{
+	return mDoorPos;
+}
+
 
 class House {
 	public:
+		struct DoorInfo {
+			unsigned int WallIndex;
+			float DoorPosition;
+			float DoorWidth;
+		};
+
+
 		House() { }
 		House(const Common::Vector3& p1,
 			const Common::Vector3& p2,
 			const Common::Vector3& p3,
-			const Common::Vector3& p4);
+			const Common::Vector3& p4,
+			const std::vector<DoorInfo>& doors);
 		bool isInside(float x, float y) const;
 		float distanceTo(float x, float y) const;
 		const std::vector<HouseWall>& getWalls() const;
@@ -240,7 +268,8 @@ class House {
 House::House(const Common::Vector3& p1,
 		const Common::Vector3& p2,
 		const Common::Vector3& p3,
-		const Common::Vector3& p4)
+		const Common::Vector3& p4,
+		const std::vector<DoorInfo>& doors)
 {
 	const float halfwidth = 0.25f;
 	mp[0] = Common::Vector2(p1.x, p1.z);
@@ -249,7 +278,7 @@ House::House(const Common::Vector3& p1,
 	mp[3] = Common::Vector2(p4.x, p4.z);
 
 	// ensure the walls are attached together on the corners
-	auto ext0 = (mp[1] - mp[0]).normalized() * halfwidth;
+	auto ext0 = (mp[0] - mp[1]).normalized() * halfwidth;
 	auto ext1 = (mp[2] - mp[0]).normalized() * halfwidth;
 	auto ext2 = (mp[1] - mp[3]).normalized() * halfwidth;
 	auto ext3 = (mp[3] - mp[2]).normalized() * halfwidth;
@@ -257,10 +286,10 @@ House::House(const Common::Vector3& p1,
 	mFloor = p1.y;
 	mRoof = mFloor + (rand() % 20 + 20) * 0.1f;
 
-	mWalls.push_back(HouseWall(mp[0] - ext0, mp[1] + ext0, halfwidth));
-	mWalls.push_back(HouseWall(mp[2] + ext1, mp[0] - ext1, halfwidth));
-	mWalls.push_back(HouseWall(mp[1] + ext2, mp[3] - ext2, halfwidth));
-	mWalls.push_back(HouseWall(mp[3] + ext3, mp[2] - ext3, halfwidth));
+	mWalls.push_back(HouseWall(mp[0] + ext0, mp[1] - ext0, halfwidth, 0.0f, doors[0].DoorPosition));
+	mWalls.push_back(HouseWall(mp[2] + ext1, mp[0] - ext1, halfwidth, 0.0f, 0.0f));
+	mWalls.push_back(HouseWall(mp[1] + ext2, mp[3] - ext2, halfwidth, 0.0f, 0.0f));
+	mWalls.push_back(HouseWall(mp[3] + ext3, mp[2] - ext3, halfwidth, 0.0f, 0.0f));
 }
 
 bool House::isInside(float x, float y) const
@@ -450,6 +479,7 @@ class WorldMap {
 		std::vector<Tree> getTreesAt(float x, float y, float r) const;
 		Common::Vector3 getNormalAt(float x, float y) const;
 		bool lineBlockedByLand(const Common::Vector3& p1, const Common::Vector3& p2, Common::Vector3* hit) const;
+		float lineBlockedByObstacles(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const;
 		float getWidth() const;
 		Common::Vector3 findFreeSpot(unsigned int tries, std::default_random_engine& gen) const;
 		const std::vector<House>& getHousesAt(float x, float y, float r) const;
@@ -592,7 +622,7 @@ void WorldMap::addHouses()
 
 		auto house = House(cornerstone, corner2,
 				corner3,
-				corner4);
+				corner4, {{0, 0.5f, 1.0f}});
 		mHouses.push_back(house);
 	}
 
@@ -712,6 +742,52 @@ bool WorldMap::lineBlockedByLand(const Common::Vector3& p1, const Common::Vector
 	return false;
 }
 
+float WorldMap::lineBlockedByObstacles(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const
+{
+	// TODO: take buildings into account
+	float obscoeff = 0.0f;
+	auto treeBlockCoeff = bullet ? Tree::TRUNK_COEFFICIENT : Tree::UNSEETHROUGH_COEFFICIENT;
+	auto trees = getTreesAt(p2.x, p2.z, p1.distance(p2));
+
+	if(nearest)
+		*nearest = Common::Vector3();
+
+	std::sort(trees.begin(), trees.end(), [&] (const Tree& t1, const Tree& t2) {
+			return p1.distance2(t1.Position) <
+				p1.distance2(t2.Position); });
+
+	for(const auto& t : trees) {
+		auto treeHeight = t.Position.y + t.Radius * Tree::HEIGHT_COEFFICIENT;
+		if(p2.y > treeHeight && p2.y > treeHeight)
+			continue;
+
+		Common::Vector2 nearest2;
+		Common::Vector2 pos2(p1.x, p1.z);
+		Common::Vector2 oldpos2(p2.x, p2.z);
+		auto dist = Common::Math::pointToSegmentDistance(oldpos2,
+				pos2,
+				Common::Vector2(t.Position.x, t.Position.z), &nearest2);
+		auto rad = t.Radius * treeBlockCoeff;
+
+		if(dist < rad) {
+			if(!bullet) {
+				return 1.0f;
+			} else {
+				auto distTravelledInTrunk = rad - dist;
+				obscoeff += distTravelledInTrunk * Tree::BULLET_SLOWDOWN_PER_TREE_METER;
+				if(nearest && nearest->null()) {
+					auto distFromStartToImpact = pos2.distance(nearest2);
+					auto distFromEndToImpact = oldpos2.distance(nearest2);
+					auto distCoeff = distFromStartToImpact / (distFromStartToImpact + distFromEndToImpact);
+					auto newHeight = p2.y + distCoeff * (p1.y - p2.y);
+					*nearest = Common::Vector3(nearest2.x, newHeight, nearest2.y);
+				}
+			}
+		}
+	}
+	return obscoeff;
+}
+
 class Weapon {
 	public:
 		Weapon();
@@ -758,29 +834,33 @@ class PhysicsCommon {
 template <typename Physics>
 void PhysicsCommon<Physics>::update(float dt, Physics& p)
 {
+	// add forces
 	p.mAcceleration.y -= 10.0f;
+
+	// update position
+	auto oldpos = p.mPosition;
+	p.mPosition += p.mVelocity * dt;
+
+	// update velocity
 	p.mVelocity += p.mAcceleration * dt;
 	if(p.mMaxVel) {
 		p.mVelocity.truncate(p.mMaxVel);
 	}
-
-	if(dt && p.mVelFriction) {
-		p.mAcceleration += p.mVelocity.normalized() * (1.0f - p.mVelFriction);
+	if(dt && p.mDamping) {
+		p.mVelocity = p.mVelocity * pow(p.mDamping, dt);
 	}
 
-	auto oldpos = p.mPosition;
-	p.mPosition += p.mVelocity * dt;
+	p.mAcceleration = Common::Vector3();
+
 	p.checkTreeCollision(oldpos);
 	p.checkLandCollision(oldpos);
 	p.checkWallCollision(oldpos);
-
-	p.mAcceleration = Common::Vector3();
 }
 
 class SoldierPhysics {
 	public:
 		SoldierPhysics() = default;
-		SoldierPhysics(const WorldMap* wmap, float maxvel, float velfriction, float friction);
+		SoldierPhysics(const WorldMap* wmap, float maxvel, float damping, float friction);
 		void update(float dt);
 		void addAcceleration(const Common::Vector3& vec);
 		const Common::Vector3& getPosition() const { return mPosition; }
@@ -796,6 +876,8 @@ class SoldierPhysics {
 		void setAiming(bool a);
 		bool isAiming() const;
 
+		static constexpr float RunAcceleration = 10.0f;
+
 	private:
 		void checkTreeCollision(const Common::Vector3& oldpos);
 		void checkLandCollision(const Common::Vector3& oldpos);
@@ -808,18 +890,18 @@ class SoldierPhysics {
 		float mAimPitch;
 		const WorldMap* mMap;
 		float mMaxVel;
-		float mVelFriction;
+		float mDamping;
 		float mFriction;
 		bool mAiming;
 
 		friend class PhysicsCommon<SoldierPhysics>;
 };
 
-SoldierPhysics::SoldierPhysics(const WorldMap* wmap, float maxvel, float velfriction, float friction)
+SoldierPhysics::SoldierPhysics(const WorldMap* wmap, float maxvel, float damping, float friction)
 	: mAimPitch(0.0f),
 	mMap(wmap),
 	mMaxVel(maxvel),
-	mVelFriction(velfriction),
+	mDamping(damping),
 	mFriction(friction),
 	mAiming(false)
 {
@@ -837,6 +919,7 @@ void SoldierPhysics::checkLandCollision(const Common::Vector3& oldpos)
 	if(ydiff > 0.0f) {
 		mPosition.y += ydiff;
 		mVelocity = mVelocity * mFriction;
+		mVelocity.y = 0.0f;
 	}
 
 	if(hgt < -1.2f) {
@@ -909,7 +992,6 @@ void SoldierPhysics::addAcceleration(const Common::Vector3& vec)
 		return;
 
 	mAcceleration += vec;
-	mAcceleration.truncate(1.0f);
 }
 
 Common::Quaternion SoldierPhysics::getAimPitch() const
@@ -937,7 +1019,7 @@ bool SoldierPhysics::isAiming() const
 class BulletPhysics {
 	public:
 		BulletPhysics() = default;
-		BulletPhysics(const WorldMap* wmap, float maxvel, float velfriction, float friction);
+		BulletPhysics(const WorldMap* wmap, float maxvel, float damping, float friction);
 		void update(float dt);
 		const Common::Vector3& getPosition() const { return mPosition; }
 		const Common::Vector3& getVelocity() const { return mVelocity; }
@@ -956,18 +1038,17 @@ class BulletPhysics {
 		Common::Vector3 mAcceleration;
 		const WorldMap* mMap;
 		float mMaxVel;
-		float mVelFriction;
+		float mDamping;
 		float mFriction;
 		bool mActive;
 
-		static constexpr float BULLET_SLOWDOWN_PER_TREE_METER = 1000.0f;
 		friend class PhysicsCommon<BulletPhysics>;
 };
 
-BulletPhysics::BulletPhysics(const WorldMap* wmap, float maxvel, float velfriction, float friction)
+BulletPhysics::BulletPhysics(const WorldMap* wmap, float maxvel, float damping, float friction)
 	: mMap(wmap),
 	mMaxVel(maxvel),
-	mVelFriction(velfriction),
+	mDamping(damping),
 	mFriction(friction),
 	mActive(true)
 {
@@ -1021,33 +1102,16 @@ void BulletPhysics::checkWallCollision(const Common::Vector3& oldpos)
 
 void BulletPhysics::checkTreeCollision(const Common::Vector3& oldpos)
 {
-	for(const auto& t : mMap->getTreesAt(mPosition.x, mPosition.z, 5.0f)) {
-		auto treeHeight = t.Position.y + t.Radius * Tree::HEIGHT_COEFFICIENT;
-		if(oldpos.y > treeHeight && mPosition.y > treeHeight)
-			return;
+	Common::Vector3 nearest;
+	auto obscoeff = mMap->lineBlockedByObstacles(oldpos, mPosition, true, &nearest);
+	if(obscoeff) {
+		auto currSpeed = mVelocity.length();
+		auto speed = std::max<double>(0.0,
+				currSpeed - obscoeff);
+		mVelocity = mVelocity.normalized() * speed;
 
-		Common::Vector2 nearest;
-		Common::Vector2 oldpos2(oldpos.x, oldpos.z);
-		Common::Vector2 pos2(mPosition.x, mPosition.z);
-		auto dist = Common::Math::pointToSegmentDistance(oldpos2,
-				pos2,
-				Common::Vector2(t.Position.x, t.Position.z), &nearest);
-		auto rad = t.Radius * Tree::TRUNK_COEFFICIENT;
-
-		if(dist < rad) {
-			auto distTravelledInTrunk = rad - dist;
-			auto currSpeed = mVelocity.length();
-			auto speed = std::max<double>(0.0,
-					currSpeed - distTravelledInTrunk * BULLET_SLOWDOWN_PER_TREE_METER);
-			mVelocity = mVelocity.normalized() * speed;
-
-			if(mVelocity.length() < 1.0f) {
-				auto distFromStartToImpact = oldpos2.distance(nearest);
-				auto distFromEndToImpact = pos2.distance(nearest);
-				auto distCoeff = distFromStartToImpact / (distFromStartToImpact + distFromEndToImpact);
-				auto newHeight = oldpos.y + distCoeff * (mPosition.y - oldpos.y);
-				mPosition = Common::Vector3(nearest.x, newHeight, nearest.y);
-			}
+		if(mVelocity.length() < 1.0f) {
+			mPosition = nearest;
 		}
 	}
 }
@@ -1174,15 +1238,11 @@ BulletRenderer::BulletRenderer(Scene::Scene* scene, const HitterComponent* hit, 
 
 void BulletRenderer::update(float dt)
 {
-	auto r = mHitter->getLastRay();
-	if(mHitter->isActive() || (mLineTicks && r.start != r.end)) {
-		mScene->addLine(mName, r.start, r.end, Common::Color::Red);
-		mLineTicks++;
-	}
+	mScene->clearLine(mName);
 
-	if(mLineTicks > 5) {
-		mLineTicks = 0;
-		mScene->clearLine(mName);
+	auto r = mHitter->getLastRay();
+	if(mHitter->isActive() && r.start.distance2(r.end) > 1.0f) {
+		mScene->addLine(mName, r.start, r.end, Common::Color::Red);
 	}
 }
 
@@ -1235,9 +1295,9 @@ void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Qu
 	*ph = BulletPhysics(mMap, 0.0f, 0.99f, 0.0f);
 	ph->setPosition(pos + Common::Vector3(0.0f, 1.7f, 0.0f));
 	auto velvec = Common::Math::rotate3D(Scene::WorldForward, ori);
-	velvec.x += Common::Random::clamped() * 0.01f;
-	velvec.y += Common::Random::clamped() * 0.01f;
-	velvec.z += Common::Random::clamped() * 0.01f;
+	velvec.x += Common::Random::clamped() * 0.005f;
+	velvec.y += Common::Random::clamped() * 0.005f;
+	velvec.z += Common::Random::clamped() * 0.005f;
 	velvec.normalize();
 	ph->setVelocity(velvec * 700.0f);
 
@@ -1401,12 +1461,12 @@ void Soldiers::update(float dt)
 
 void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
 {
-	const unsigned int numSoldiers = 8;
+	const unsigned int numSoldiers = 4;
 
 	mPlayerSoldierIndex = 0;
 	std::default_random_engine gen((unsigned int)time(0));
 	for(unsigned int i = 0; i < numSoldiers; i++) {
-		mPhysics[i] = SoldierPhysics(wmap, 5.0f, 0.95f, 1.0f);
+		mPhysics[i] = SoldierPhysics(wmap, 5.0f, 0.10f, 1.0f);
 		auto pos = wmap->findFreeSpot(100, gen);
 		if(pos.null()) {
 			throw std::runtime_error("No space for a soldier in the world");
@@ -1555,7 +1615,7 @@ void PlayerInput::update(float dt)
 
 	Common::Vector3 accel;
 	accel = Common::Math::rotate3D(mInputAccel, mPhys->getOrientation());
-	mPhys->addAcceleration(accel);
+	mPhys->addAcceleration(accel * SoldierPhysics::RunAcceleration);
 }
 
 bool PlayerInput::handleKeyDown(float frameTime, SDLKey key)
@@ -1701,6 +1761,7 @@ class AISensor {
 		const SoldierPhysics* mPhys;
 		std::vector<SoldierKnowledge> mSensedSoldiers;
 		unsigned int mID;
+		Common::SteadyTimer mTimer = Common::SteadyTimer(0.2f);
 };
 
 AISensor::AISensor(const WorldMap* wmap, const Soldiers* soldiers, unsigned int id)
@@ -1713,16 +1774,18 @@ AISensor::AISensor(const WorldMap* wmap, const Soldiers* soldiers, unsigned int 
 
 void AISensor::update(float dt)
 {
-	mSensedSoldiers.clear();
-	auto& mypos = mPhys->getPosition();
-	auto mydir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation());
-	for(auto& s : mSoldiers->getSoldiersAt(mypos, 100.0f)) {
-		if(s != mID && canSee(s) && mSoldiers->soldierIsAlive(s)) {
-			auto& othpos = mSoldiers->getSoldierPosition(s);
-			Common::Vector3 posdiff = othpos - mypos;
-			auto ang = Common::Vector2(posdiff.x, posdiff.z).angleTo(Common::Vector2(mydir.x, mydir.z));
-			if(ang < QUARTER_PI) {
-				mSensedSoldiers.push_back(SoldierKnowledge(s, othpos));
+	if(mTimer.check(dt)) {
+		mSensedSoldiers.clear();
+		auto& mypos = mPhys->getPosition();
+		auto mydir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation());
+		for(auto& s : mSoldiers->getSoldiersAt(mypos, 100.0f)) {
+			if(s != mID && canSee(s) && mSoldiers->soldierIsAlive(s)) {
+				auto& othpos = mSoldiers->getSoldierPosition(s);
+				Common::Vector3 posdiff = othpos - mypos;
+				auto ang = Common::Vector2(posdiff.x, posdiff.z).angleTo(Common::Vector2(mydir.x, mydir.z));
+				if(ang < QUARTER_PI) {
+					mSensedSoldiers.push_back(SoldierKnowledge(s, othpos));
+				}
 			}
 		}
 	}
@@ -1741,9 +1804,12 @@ std::vector<SoldierKnowledge> AISensor::getCurrentlySeenEnemies() const
 bool AISensor::canSee(unsigned int id) const
 {
 	// TODO: take trees into account
-	return !mMap->lineBlockedByLand(mPhys->getPosition() + Common::Vector3(0.0f, 1.7f, 0.0f),
-			mSoldiers->getSoldierPosition(id) + Common::Vector3(0.0f, 1.65f, 0.0f),
-			nullptr);
+	auto sightpos = mPhys->getPosition() + Common::Vector3(0.0f, 1.7f, 0.0f);
+	auto enemypos = mSoldiers->getSoldierPosition(id) + Common::Vector3(0.0f, 1.65f, 0.0f);
+	return !mMap->lineBlockedByLand(sightpos,
+			enemypos,
+			nullptr) &&
+		!mMap->lineBlockedByObstacles(sightpos, enemypos, false, nullptr);
 }
 
 class AITask {
@@ -1755,25 +1821,29 @@ class AITask {
 		};
 
 		Common::Vector3 Vec;
-		Type Type;
+		Type Type = Type::Idle;
 };
 
 class AIPlanner {
 	public:
 		AIPlanner() = default;
-		AIPlanner(const SoldierPhysics* phys);
+		AIPlanner(const WorldMap* wmap, const SoldierPhysics* phys);
 		AITask getNextTask(const AISensor& sensor);
+		void updateTask(const AISensor& sensor);
 
 	private:
+		const WorldMap* mMap;
 		const SoldierPhysics* mPhys;
+		AITask mCurrTask;
 };
 
-AIPlanner::AIPlanner(const SoldierPhysics* phys)
-	: mPhys(phys)
+AIPlanner::AIPlanner(const WorldMap* wmap, const SoldierPhysics* phys)
+	: mMap(wmap),
+	mPhys(phys)
 {
 }
 
-AITask AIPlanner::getNextTask(const AISensor& sensor)
+void AIPlanner::updateTask(const AISensor& sensor)
 {
 	auto enemiesSeen = sensor.getCurrentlySeenEnemies();
 	if(enemiesSeen.size() > 0) {
@@ -1784,13 +1854,28 @@ AITask AIPlanner::getNextTask(const AISensor& sensor)
 		AITask t;
 		t.Type = AITask::Type::Shoot;
 		t.Vec = enemiesSeen[0].getPosition();
-		return t;
+		mCurrTask = t;
+	} else if(mCurrTask.Type == AITask::Type::Idle) {
+		AITask t;
+		t.Type = AITask::Type::Move;
+		auto w2 = mMap->getWidth() * 0.5f;
+		auto xtgt = Common::Random::clamped() * w2 + w2;
+		auto ytgt = Common::Random::clamped() * w2 + w2;
+		if(mMap->getHeightAt(xtgt, ytgt) > 0.0f) {
+			t.Vec = Common::Vector3(xtgt, 0.0f, ytgt);
+			mCurrTask = t;
+		} // else idle one more step
+	} else if(mCurrTask.Type == AITask::Type::Move && mPhys->getPosition().distance(mCurrTask.Vec) > 10.0f) {
+		// continue with existing task
+	} else {
+		mCurrTask = AITask();
 	}
+}
 
-	AITask t;
-	t.Type = AITask::Type::Move;
-	t.Vec = Common::Vector3(64.0f, 0.0f, 64.0f);
-	return t;
+AITask AIPlanner::getNextTask(const AISensor& sensor)
+{
+	updateTask(sensor);
+	return mCurrTask;
 }
 
 class AIActor {
@@ -1800,6 +1885,8 @@ class AIActor {
 		void execute(const AITask& t);
 
 	private:
+		float turnTowards(const Common::Vector3& abspos);
+
 		SoldierPhysics* mPhys;
 		ShooterComponent* mShooter;
 };
@@ -1822,30 +1909,40 @@ void AIActor::execute(const AITask& t)
 				accel = t.Vec - mPhys->getPosition();
 				accel.y = 0.0f;
 				if(accel.length() > 1.0f) {
-					mPhys->addAcceleration(accel);
+					mPhys->addAcceleration(accel.normalized() * SoldierPhysics::RunAcceleration);
+					turnTowards(t.Vec);
 				}
 			}
 			break;
 
 		case AITask::Type::Shoot:
 			{
+				auto diffyaw = turnTowards(t.Vec);
 				auto currdir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation() * mPhys->getAimPitch());
 				auto tgtvec = t.Vec - mPhys->getPosition();
-				auto curryaw = atan2(currdir.z, currdir.x);
-				auto tgtyaw = atan2(tgtvec.z, tgtvec.x) + Common::Random::clamped() * 0.2f;
 				auto currpitch = atan2(currdir.y, 1.0f);
 				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f) + Common::Random::clamped() * 0.2f;
-				auto diffyaw = curryaw - tgtyaw;
 				auto diffpitch = -(currpitch - tgtpitch);
-				mPhys->rotate(0.02f * diffyaw, 0.02f * diffpitch);
+				mPhys->rotate(0.0f, 0.02f * diffpitch);
 				if(fabs(diffyaw) < 0.2f && fabs(diffpitch) < 0.2f) {
 					mShooter->shoot();
 				}
-				mPhys->addAcceleration(currdir);
 			}
 			break;
 	}
 }
+
+float AIActor::turnTowards(const Common::Vector3& abspos)
+{
+	auto currdir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation());
+	auto tgtvec = abspos - mPhys->getPosition();
+	auto curryaw = atan2(currdir.z, currdir.x);
+	auto tgtyaw = atan2(tgtvec.z, tgtvec.x) + Common::Random::clamped() * 0.2f;
+	auto diffyaw = curryaw - tgtyaw;
+	mPhys->rotate(0.02f * diffyaw, 0.0f);
+	return diffyaw;
+}
+
 
 class AIComponent {
 	public:
@@ -1866,7 +1963,7 @@ class AIComponent {
 AIComponent::AIComponent(const WorldMap* wmap, Soldiers* soldiers, unsigned int id)
 	: mSoldiers(soldiers),
 	mSensor(wmap, soldiers, id),
-	mPlanner(soldiers->getPhys(id)),
+	mPlanner(wmap, soldiers->getPhys(id)),
 	mActor(soldiers->getPhys(id), soldiers->getShooter(id)),
 	mPhys(soldiers->getPhys(id)),
 	mShooter(soldiers->getShooter(id)),
