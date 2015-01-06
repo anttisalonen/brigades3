@@ -484,6 +484,8 @@ class WorldMap {
 		Common::Vector3 findFreeSpot(unsigned int tries, std::default_random_engine& gen) const;
 		const std::vector<House>& getHousesAt(float x, float y, float r) const;
 		Common::Vector3 pointToVec(float x, float y) const;
+		float getHeightOnCollisionPoint(const Common::Vector3& p1, const Common::Vector3& p2,
+				const Common::Vector2& collpoint) const;
 
 	private:
 		void addHouses();
@@ -762,10 +764,10 @@ float WorldMap::lineBlockedByObstacles(const Common::Vector3& p1, const Common::
 			continue;
 
 		Common::Vector2 nearest2;
-		Common::Vector2 pos2(p1.x, p1.z);
-		Common::Vector2 oldpos2(p2.x, p2.z);
-		auto dist = Common::Math::pointToSegmentDistance(oldpos2,
-				pos2,
+		Common::Vector2 p12(p1.x, p1.z);
+		Common::Vector2 p22(p2.x, p2.z);
+		auto dist = Common::Math::pointToSegmentDistance(p12,
+				p22,
 				Common::Vector2(t.Position.x, t.Position.z), &nearest2);
 		auto rad = t.Radius * treeBlockCoeff;
 
@@ -776,16 +778,24 @@ float WorldMap::lineBlockedByObstacles(const Common::Vector3& p1, const Common::
 				auto distTravelledInTrunk = rad - dist;
 				obscoeff += distTravelledInTrunk * Tree::BULLET_SLOWDOWN_PER_TREE_METER;
 				if(nearest && nearest->null()) {
-					auto distFromStartToImpact = pos2.distance(nearest2);
-					auto distFromEndToImpact = oldpos2.distance(nearest2);
-					auto distCoeff = distFromStartToImpact / (distFromStartToImpact + distFromEndToImpact);
-					auto newHeight = p2.y + distCoeff * (p1.y - p2.y);
+					auto newHeight = getHeightOnCollisionPoint(p1,
+							p2,
+							nearest2);
 					*nearest = Common::Vector3(nearest2.x, newHeight, nearest2.y);
 				}
 			}
 		}
 	}
 	return obscoeff;
+}
+
+float WorldMap::getHeightOnCollisionPoint(const Common::Vector3& p1, const Common::Vector3& p2,
+		const Common::Vector2& collpoint) const
+{
+	auto distFromStartToImpact = Common::Vector2(p1.x, p1.z).distance(collpoint);
+	auto distFromEndToImpact = Common::Vector2(p2.x, p2.z).distance(collpoint);
+	auto distCoeff = distFromStartToImpact / (distFromStartToImpact + distFromEndToImpact);
+	return p1.y + distCoeff * (p2.y - p1.y);
 }
 
 class Weapon {
@@ -960,11 +970,10 @@ void SoldierPhysics::checkWallCollision(const Common::Vector3& oldpos)
 					rs,
 					re,
 					mp, &nearest);
-			if(dist < width + 0.5f) {
+			if(dist < width + 1.0f) {
 				// soldier is within wall
-				std::cout << "Soldier is within wall\n";
-				auto vecFromWall = op +
-					(op - nearest).normalized() * (width + 0.5f);
+				auto vecFromWall = nearest +
+					(mp - nearest).normalized() * (width + 1.0f);
 				mPosition = mMap->pointToVec(vecFromWall.x, vecFromWall.y);
 			} else if(travdist > width) {
 				// not within wall but possibly tunneled
@@ -1077,12 +1086,18 @@ void BulletPhysics::checkLandCollision(const Common::Vector3& oldpos)
 
 void BulletPhysics::checkWallCollision(const Common::Vector3& oldpos)
 {
+	// TODO: this doesn't check for collision against the roof
+	Common::Vector2 mp = Common::Vector2(mPosition.x, mPosition.z);
+	Common::Vector2 op = Common::Vector2(oldpos.x, oldpos.z);
+
 	for(const auto& house : mMap->getHousesAt(mPosition.x, mPosition.z, oldpos.distance(mPosition) + 5.0f)) {
+		auto roofheight = house.getHouseRoofHeight();
+		if(roofheight < mPosition.y && roofheight < oldpos.y)
+			continue;
+
 		for(const auto& wall : house.getWalls()) {
 			const auto& rs = wall.getStart();
 			const auto& re = wall.getEnd();
-			Common::Vector2 mp = Common::Vector2(mPosition.x, mPosition.z);
-			Common::Vector2 op = Common::Vector2(oldpos.x, oldpos.z);
 
 			bool found;
 			auto hitpoint = Common::Math::segmentSegmentIntersection2D(
@@ -1092,9 +1107,14 @@ void BulletPhysics::checkWallCollision(const Common::Vector3& oldpos)
 					mp,
 					&found);
 			if(found) {
-				mPosition = mMap->pointToVec(hitpoint.x, hitpoint.y);
-				mVelocity.zero();
-				break;
+				auto newHeight = mMap->getHeightOnCollisionPoint(oldpos,
+						mPosition,
+						hitpoint);
+				if(newHeight < roofheight) {
+					mPosition = Common::Vector3(hitpoint.x, newHeight, hitpoint.y);
+					mVelocity.zero();
+					break;
+				}
 			}
 		}
 	}
