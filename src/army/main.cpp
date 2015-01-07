@@ -478,14 +478,16 @@ class WorldMap {
 		float getHeightAt(float x, float y) const;
 		std::vector<Tree> getTreesAt(float x, float y, float r) const;
 		Common::Vector3 getNormalAt(float x, float y) const;
-		bool lineBlockedByLand(const Common::Vector3& p1, const Common::Vector3& p2, Common::Vector3* hit) const;
 		float lineBlockedByObstacles(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const;
+		bool lineBlockedByLand(const Common::Vector3& p1, const Common::Vector3& p2, Common::Vector3* hit) const;
+		float lineBlockedByTrees(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const;
 		float getWidth() const;
 		Common::Vector3 findFreeSpot(unsigned int tries, std::default_random_engine& gen) const;
 		const std::vector<House>& getHousesAt(float x, float y, float r) const;
 		Common::Vector3 pointToVec(float x, float y) const;
 		float getHeightOnCollisionPoint(const Common::Vector3& p1, const Common::Vector3& p2,
 				const Common::Vector2& collpoint) const;
+		float lineBlockedByWalls(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const;
 
 	private:
 		void addHouses();
@@ -746,7 +748,35 @@ bool WorldMap::lineBlockedByLand(const Common::Vector3& p1, const Common::Vector
 
 float WorldMap::lineBlockedByObstacles(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const
 {
-	// TODO: take buildings into account
+	Common::Vector3 nearestTree;
+	Common::Vector3 nearestWall;
+	auto treeRet = lineBlockedByTrees(p1, p2, bullet, &nearestTree);
+	auto wallRet = lineBlockedByWalls(p1, p2, bullet, &nearestWall);
+	if(treeRet && wallRet) {
+		if(p1.distance2(nearestTree) < p1.distance2(nearestWall)) {
+			if(nearest)
+				*nearest = nearestTree;
+			return treeRet;
+		} else {
+			if(nearest)
+				*nearest = nearestWall;
+			return wallRet;
+		}
+	} else if(treeRet) {
+		if(nearest)
+			*nearest = nearestTree;
+		return treeRet;
+	} else if(wallRet) {
+		if(nearest)
+			*nearest = nearestWall;
+		return wallRet;
+	}
+
+	return 0.0f;
+}
+
+float WorldMap::lineBlockedByTrees(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const
+{
 	float obscoeff = 0.0f;
 	auto treeBlockCoeff = bullet ? Tree::TRUNK_COEFFICIENT : Tree::UNSEETHROUGH_COEFFICIENT;
 	auto trees = getTreesAt(p2.x, p2.z, p1.distance(p2));
@@ -787,6 +817,52 @@ float WorldMap::lineBlockedByObstacles(const Common::Vector3& p1, const Common::
 		}
 	}
 	return obscoeff;
+}
+
+float WorldMap::lineBlockedByWalls(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const
+{
+	// TODO: this doesn't check for collision against the roof
+	Common::Vector2 mp = Common::Vector2(p2.x, p2.z);
+	Common::Vector2 op = Common::Vector2(p1.x, p1.z);
+
+	float distToNearest = FLT_MAX;
+
+	for(const auto& house : getHousesAt(p2.x, p2.z, p1.distance(p2) + 5.0f)) {
+		auto roofheight = house.getHouseRoofHeight();
+		if(roofheight < p2.y && roofheight < p1.y)
+			continue;
+
+		for(const auto& wall : house.getWalls()) {
+			const auto& rs = wall.getStart();
+			const auto& re = wall.getEnd();
+
+			bool found;
+			auto hitpoint = Common::Math::segmentSegmentIntersection2D(
+					rs,
+					re,
+					op,
+					mp,
+					&found);
+			if(found) {
+				auto newHeight = getHeightOnCollisionPoint(p1,
+						p2,
+						hitpoint);
+				if(newHeight < roofheight) {
+					auto hitpoint3 = Common::Vector3(hitpoint.x, newHeight, hitpoint.y);
+					auto thisDist = p1.distance2(hitpoint3);
+					if(thisDist < distToNearest) {
+						distToNearest = thisDist;
+						if(nearest)
+							*nearest = hitpoint3;
+					}
+				}
+			}
+		}
+	}
+
+	if(distToNearest != FLT_MAX)
+		return 1.0f;
+	return 0.0f;
 }
 
 float WorldMap::getHeightOnCollisionPoint(const Common::Vector3& p1, const Common::Vector3& p2,
@@ -1086,44 +1162,18 @@ void BulletPhysics::checkLandCollision(const Common::Vector3& oldpos)
 
 void BulletPhysics::checkWallCollision(const Common::Vector3& oldpos)
 {
-	// TODO: this doesn't check for collision against the roof
-	Common::Vector2 mp = Common::Vector2(mPosition.x, mPosition.z);
-	Common::Vector2 op = Common::Vector2(oldpos.x, oldpos.z);
-
-	for(const auto& house : mMap->getHousesAt(mPosition.x, mPosition.z, oldpos.distance(mPosition) + 5.0f)) {
-		auto roofheight = house.getHouseRoofHeight();
-		if(roofheight < mPosition.y && roofheight < oldpos.y)
-			continue;
-
-		for(const auto& wall : house.getWalls()) {
-			const auto& rs = wall.getStart();
-			const auto& re = wall.getEnd();
-
-			bool found;
-			auto hitpoint = Common::Math::segmentSegmentIntersection2D(
-					rs,
-					re,
-					op,
-					mp,
-					&found);
-			if(found) {
-				auto newHeight = mMap->getHeightOnCollisionPoint(oldpos,
-						mPosition,
-						hitpoint);
-				if(newHeight < roofheight) {
-					mPosition = Common::Vector3(hitpoint.x, newHeight, hitpoint.y);
-					mVelocity.zero();
-					break;
-				}
-			}
-		}
+	Common::Vector3 nearest;
+	auto ret = mMap->lineBlockedByWalls(oldpos, mPosition, true, &nearest);
+	if(ret) {
+		mPosition = nearest;
+		mVelocity.zero();
 	}
 }
 
 void BulletPhysics::checkTreeCollision(const Common::Vector3& oldpos)
 {
 	Common::Vector3 nearest;
-	auto obscoeff = mMap->lineBlockedByObstacles(oldpos, mPosition, true, &nearest);
+	auto obscoeff = mMap->lineBlockedByTrees(oldpos, mPosition, true, &nearest);
 	if(obscoeff) {
 		auto currSpeed = mVelocity.length();
 		auto speed = std::max<double>(0.0,
