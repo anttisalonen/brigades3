@@ -29,7 +29,7 @@ class Soldiers {
 	public:
 		Soldiers(Scene::Scene& scene);
 		void update(float dt);
-		void addSoldiers(const WorldMap* wmap, Bullets* bullets);
+		void addSoldiers(const WorldMap* wmap, Bullets* bullets, unsigned int numSoldiers);
 		const Common::Vector3& getPlayerSoldierPosition() const;
 		Common::Quaternion getPlayerSoldierOrientation() const;
 		bool getPlayerSoldierAiming() const;

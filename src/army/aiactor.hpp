@@ -10,14 +10,15 @@
 class AIActor {
 	public:
 		AIActor() = default;
-		AIActor(SoldierPhysics* phys, ShooterComponent* shooter);
+		AIActor(SoldierPhysics* phys, ShooterComponent* shooter, float shootingSkill);
 		void execute(const AITask& t);
 
 	private:
-		float turnTowards(const Common::Vector3& abspos);
+		float turnTowards(const Common::Vector3& abspos, float variation);
 
 		SoldierPhysics* mPhys;
 		ShooterComponent* mShooter;
+		float mVariation;
 };
 
 #endif

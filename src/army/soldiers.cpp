@@ -48,10 +48,8 @@ void Soldiers::update(float dt)
 	}
 }
 
-void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets)
+void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets, unsigned int numSoldiers)
 {
-	const unsigned int numSoldiers = 4;
-
 	mPlayerSoldierIndex = 0;
 	std::default_random_engine gen((unsigned int)time(0));
 	for(unsigned int i = 0; i < numSoldiers; i++) {

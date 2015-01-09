@@ -3,10 +3,12 @@
 
 #include "aiactor.hpp"
 
-AIActor::AIActor(SoldierPhysics* phys, ShooterComponent* shooter)
+AIActor::AIActor(SoldierPhysics* phys, ShooterComponent* shooter, float shootingSkill)
 	: mPhys(phys),
 	mShooter(shooter)
 {
+	shootingSkill = Common::clamp(0.0f, shootingSkill, 1.0f);
+	mVariation = (1.0f - shootingSkill) * 0.3f;
 }
 
 void AIActor::execute(const AITask& t)
@@ -22,21 +24,21 @@ void AIActor::execute(const AITask& t)
 				accel.y = 0.0f;
 				if(accel.length() > 1.0f) {
 					mPhys->addAcceleration(accel.normalized() * SoldierPhysics::RunAcceleration);
-					turnTowards(t.Vec);
+					turnTowards(t.Vec, 0.0f);
 				}
 			}
 			break;
 
 		case AITask::Type::Shoot:
 			{
-				auto diffyaw = turnTowards(t.Vec);
+				auto diffyaw = turnTowards(t.Vec, mVariation);
 				auto currdir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation() * mPhys->getAimPitch());
 				auto tgtvec = t.Vec - mPhys->getPosition();
 				auto currpitch = atan2(currdir.y, 1.0f);
-				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f) + Common::Random::clamped() * 0.2f;
+				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f) + Common::Random::clamped() * mVariation;
 				auto diffpitch = -(currpitch - tgtpitch);
 				mPhys->rotate(0.0f, 0.02f * diffpitch);
-				if(fabs(diffyaw) < 0.2f && fabs(diffpitch) < 0.2f) {
+				if(fabs(diffyaw) < mVariation * 0.2f + 0.05f && fabs(diffpitch) < mVariation * 0.2f + 0.05f) {
 					mShooter->shoot();
 				}
 			}
@@ -44,12 +46,14 @@ void AIActor::execute(const AITask& t)
 	}
 }
 
-float AIActor::turnTowards(const Common::Vector3& abspos)
+float AIActor::turnTowards(const Common::Vector3& abspos, float variation)
 {
 	auto currdir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation());
 	auto tgtvec = abspos - mPhys->getPosition();
 	auto curryaw = atan2(currdir.z, currdir.x);
-	auto tgtyaw = atan2(tgtvec.z, tgtvec.x) + Common::Random::clamped() * 0.2f;
+	auto tgtyaw = atan2(tgtvec.z, tgtvec.x);
+	if(variation)
+		tgtyaw += Common::Random::clamped() * variation;
 	auto diffyaw = curryaw - tgtyaw;
 	mPhys->rotate(0.02f * diffyaw, 0.0f);
 	return diffyaw;

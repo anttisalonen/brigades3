@@ -46,10 +46,14 @@ bool WindowFocus::getWindowFocus()
 }
 
 
+struct Constants {
+	unsigned int NumSoldiers = 4;
+	AIConstants AIConstants = { 0.5f, 0.5f };
+};
 
 class World {
 	public:
-		World(Scene::Scene& scene);
+		World(Scene::Scene& scene, const Constants& constants);
 		void init();
 		void update(float dt);
 		bool handleKeyDown(float frameTime, SDLKey key);
@@ -67,15 +71,17 @@ class World {
 		Scene::Camera& mCamera;
 		PlayerInput mPlayerInput;
 		std::map<SDLKey, std::function<void (float)>> mControls;
+		Constants mConstants;
 };
 
-World::World(Scene::Scene& scene)
+World::World(Scene::Scene& scene, const Constants& constants)
 	: mMap(scene),
 	mSoldiers(scene),
 	mBullets(&mMap, &scene),
 	mScene(scene),
 	mObserverMode(false),
-	mCamera(mScene.getDefaultCamera())
+	mCamera(mScene.getDefaultCamera()),
+	mConstants(constants)
 {
 	mControls[SDLK_w] = [&] (float p) { mCamera.setForwardMovement(p); };
 	mControls[SDLK_q] = [&] (float p) { mCamera.setUpwardsMovement(p); };
@@ -88,9 +94,9 @@ World::World(Scene::Scene& scene)
 void World::init()
 {
 	mMap.create();
-	mSoldiers.addSoldiers(&mMap, &mBullets);
+	mSoldiers.addSoldiers(&mMap, &mBullets, mConstants.NumSoldiers);
 	mPlayerInput = PlayerInput(&mSoldiers);
-	mAI = AI(&mMap, &mSoldiers);
+	mAI = AI(&mMap, &mSoldiers, mConstants.AIConstants);
 	mAI.init();
 }
 
@@ -216,7 +222,7 @@ bool World::handleMousePress(float frameTime, Uint8 button)
 
 class AppDriver : public Common::Driver {
 	public:
-		AppDriver();
+		AppDriver(const Constants& constants);
 		virtual void drawFrame() override;
 		virtual bool handleKeyDown(float frameTime, SDLKey key) override;
 		virtual bool handleKeyUp(float frameTime, SDLKey key) override;
@@ -229,10 +235,10 @@ class AppDriver : public Common::Driver {
 		World mWorld;
 };
 
-AppDriver::AppDriver()
+AppDriver::AppDriver(const Constants& constants)
 	: Common::Driver(800, 600, "Army"),
 	mScene(800, 600),
-	mWorld(mScene)
+	mWorld(mScene, constants)
 {
 	mScene.addModel("Soldier", "share/soldier.obj");
 	mScene.addModel("Tree", "share/tree.obj");
@@ -292,20 +298,39 @@ void AppDriver::drawFrame()
 
 class App {
 	public:
+		App(const Constants& c);
 		void go();
 
 	private:
 		AppDriver mDriver;
 };
 
+App::App(const Constants& c)
+	: mDriver(c)
+{
+}
+
 void App::go()
 {
 	mDriver.run();
 }
 
-int main(void)
+int main(int argc, char** argv)
 {
-	App a;
+	Constants c;
+	for(int i = 1; i < argc; i++) {
+		if(!strcmp(argv[i], "--soldiers")) {
+			c.NumSoldiers = atoi(argv[++i]);
+		} else if(!strcmp(argv[i], "--shotskill")) {
+			c.AIConstants.AvgShootingSkill = atof(argv[++i]);
+			c.AIConstants.MaxShootingSkillVariation = 0.0f;
+		} else {
+			fprintf(stderr, "Unknown option \"%s\"\n", argv[i]);
+			return 1;
+		}
+	}
+
+	App a(c);
 	a.go();
 	return 0;
 }

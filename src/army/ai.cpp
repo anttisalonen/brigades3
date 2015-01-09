@@ -1,10 +1,12 @@
+#include <common/Random.h>
+
 #include "ai.hpp"
 
-AIComponent::AIComponent(const WorldMap* wmap, Soldiers* soldiers, unsigned int id)
+AIComponent::AIComponent(const WorldMap* wmap, Soldiers* soldiers, unsigned int id, float shootingSkill)
 	: mSoldiers(soldiers),
 	mSensor(wmap, soldiers, id),
 	mPlanner(wmap, soldiers->getPhys(id)),
-	mActor(soldiers->getPhys(id), soldiers->getShooter(id)),
+	mActor(soldiers->getPhys(id), soldiers->getShooter(id), shootingSkill),
 	mPhys(soldiers->getPhys(id)),
 	mShooter(soldiers->getShooter(id)),
 	mHittable(soldiers->getHittable(id))
@@ -21,9 +23,10 @@ void AIComponent::update(float dt)
 	mActor.execute(task);
 }
 
-AI::AI(const WorldMap* wmap, Soldiers* soldiers)
+AI::AI(const WorldMap* wmap, Soldiers* soldiers, const AIConstants& aic)
 	: mMap(wmap),
-	mSoldiers(soldiers)
+	mSoldiers(soldiers),
+	mAIConstants(aic)
 {
 	mAIs.resize(Soldiers::MAX_SOLDIERS);
 }
@@ -32,7 +35,9 @@ void AI::init()
 {
 	mNumAIs = mSoldiers->getNumSoldiers();
 	for(unsigned int i = 0; i < mNumAIs; i++) {
-		mAIs[i] = AIComponent(mMap, mSoldiers, i);
+		auto shootingSkill = mAIConstants.AvgShootingSkill +
+			Common::Random::clamped() * mAIConstants.MaxShootingSkillVariation;
+		mAIs[i] = AIComponent(mMap, mSoldiers, i, shootingSkill);
 	}
 }
 

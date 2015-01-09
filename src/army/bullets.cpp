@@ -36,9 +36,9 @@ void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Qu
 	*ph = BulletPhysics(mMap, 0.0f, 0.99f, 0.0f);
 	ph->setPosition(pos + Common::Vector3(0.0f, 1.7f, 0.0f));
 	auto velvec = Common::Math::rotate3D(Scene::WorldForward, ori);
-	velvec.x += Common::Random::clamped() * 0.005f;
-	velvec.y += Common::Random::clamped() * 0.005f;
-	velvec.z += Common::Random::clamped() * 0.005f;
+	velvec.x += Common::Random::clamped() * 0.001f;
+	velvec.y += Common::Random::clamped() * 0.001f;
+	velvec.z += Common::Random::clamped() * 0.001f;
 	velvec.normalize();
 	ph->setVelocity(velvec * 700.0f);
 
