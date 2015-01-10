@@ -62,23 +62,18 @@ bool WorldMap::isFreeSpot(float x, float y) const
 	return getHeightAt(x, y) > 0.0f && !nearHouse(x, y, 10.0f, nullptr);
 }
 
-Common::Vector3 WorldMap::findFreeSpot(unsigned int tries, std::default_random_engine& gen) const
+Common::Vector3 WorldMap::findFreeSpot(unsigned int tries, Random::Source rs) const
 {
-	std::uniform_real_distribution<double> dis(0.0, getWidth());
+	auto w = getWidth();
 
 	for(unsigned int i = 0; i < tries; i++) {
-		float x = dis(gen);
-		float y = dis(gen);
+		float x = Random::uniform(rs) * w;
+		float y = Random::uniform(rs) * w;
 		if(isFreeSpot(x, y)) {
 			return pointToVec(x, y);
 		}
 	}
 	return Common::Vector3();
-}
-
-Common::Vector3 WorldMap::findFreeSpot(unsigned int tries)
-{
-	return findFreeSpot(tries, mGen);
 }
 
 bool WorldMap::nearHouse(float x, float y, float radius, House* house) const
@@ -96,6 +91,7 @@ bool WorldMap::nearHouse(float x, float y, float radius, House* house) const
 
 void WorldMap::create()
 {
+	mNoise.SetSeed(Random::uniform(Random::SourceWorld, 0, static_cast<unsigned int>(INT_MAX)));
 	addHouses();
 	addTrees();
 
@@ -119,13 +115,12 @@ Common::Vector3 WorldMap::pointToVec(float x, float y) const
 void WorldMap::addHouses()
 {
 	for(int i = 0; i < 50; i++) {
-		Common::Vector3 cornerstone = findFreeSpot(100);
+		Common::Vector3 cornerstone = findFreeSpot(100, Random::SourceWorld);
 		if(cornerstone.null())
 			break;
 
-		std::uniform_real_distribution<double> wallLengthDis(5.0f, 15.0f);
-		auto corner2x = wallLengthDis(mGen);
-		auto corner2z = wallLengthDis(mGen);
+		auto corner2x = Random::uniform(Random::SourceWorld, 5.0f, 15.0f);
+		auto corner2z = Random::uniform(Random::SourceWorld, 5.0f, 15.0f);
 		auto corner2 = pointToVec(cornerstone.x + corner2x,
 				cornerstone.z + corner2z);
 
@@ -136,7 +131,7 @@ void WorldMap::addHouses()
 		auto corner3_2d = Common::Math::rotate2D(Common::Vector2(corner2x,
 					corner2z), HALF_PI);
 
-		auto corner3x = wallLengthDis(mGen);
+		auto corner3x = Random::uniform(Random::SourceWorld, 5.0f, 15.0f);
 
 		corner3_2d = corner3_2d.normalized() * corner3x;
 		Common::Vector3 corner3_rel(corner3_2d.x, 0.0f, corner3_2d.y);
@@ -189,15 +184,12 @@ void WorldMap::addHouses()
 
 void WorldMap::addTrees()
 {
-	std::uniform_real_distribution<double> radiusdis(2.0f, 5.0f);
-	std::uniform_real_distribution<double> rotatdis(0.0f, QUARTER_PI);
-
 	// TODO: Create a single mesh instance with all models instead
 	for(int i = 0; i < 500; i++) {
-		auto pos = findFreeSpot(1);
+		auto pos = findFreeSpot(1, Random::SourceWorld);
 		if(!pos.null()) {
-			float r = radiusdis(mGen);
-			float rot = rotatdis(mGen);
+			float r = Random::uniform(Random::SourceWorld, 2.0f, 5.0f);
+			float rot = Random::uniform(Random::SourceWorld, 0.0f, QUARTER_PI);
 			mTrees.push_back(Tree(pos, r));
 
 			char name[256];

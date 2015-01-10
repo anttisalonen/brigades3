@@ -1,6 +1,6 @@
 #include <common/Math.h>
-#include <common/Random.h>
 
+#include "random.hpp"
 #include "aiactor.hpp"
 
 AIActor::AIActor(SoldierPhysics* phys, ShooterComponent* shooter, float shootingSkill)
@@ -35,7 +35,7 @@ void AIActor::execute(const AITask& t)
 				auto currdir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation() * mPhys->getAimPitch());
 				auto tgtvec = t.Vec - mPhys->getPosition();
 				auto currpitch = atan2(currdir.y, 1.0f);
-				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f) + Common::Random::clamped() * mVariation;
+				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f) + Random::clamped(Random::SourceAI) * mVariation;
 				auto diffpitch = -(currpitch - tgtpitch);
 				mPhys->rotate(0.0f, 0.02f * diffpitch);
 				if(fabs(diffyaw) < mVariation * 0.2f + 0.05f && fabs(diffpitch) < mVariation * 0.2f + 0.05f) {
@@ -53,7 +53,7 @@ float AIActor::turnTowards(const Common::Vector3& abspos, float variation)
 	auto curryaw = atan2(currdir.z, currdir.x);
 	auto tgtyaw = atan2(tgtvec.z, tgtvec.x);
 	if(variation)
-		tgtyaw += Common::Random::clamped() * variation;
+		tgtyaw += Random::clamped(Random::SourceAI) * variation;
 	auto diffyaw = curryaw - tgtyaw;
 	mPhys->rotate(0.02f * diffyaw, 0.0f);
 	return diffyaw;

@@ -1,5 +1,4 @@
-#include <common/Random.h>
-
+#include "random.hpp"
 #include "ai.hpp"
 
 AIComponent::AIComponent(const WorldMap* wmap, Soldiers* soldiers, unsigned int id, float shootingSkill)
@@ -36,7 +35,7 @@ void AI::init()
 	mNumAIs = mSoldiers->getNumSoldiers();
 	for(unsigned int i = 0; i < mNumAIs; i++) {
 		auto shootingSkill = mAIConstants.AvgShootingSkill +
-			Common::Random::clamped() * mAIConstants.MaxShootingSkillVariation;
+			Random::clamped(Random::SourceAI) * mAIConstants.MaxShootingSkillVariation;
 		mAIs[i] = AIComponent(mMap, mSoldiers, i, shootingSkill);
 	}
 }

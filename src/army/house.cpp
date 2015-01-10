@@ -2,6 +2,7 @@
 
 #include <common/Math.h>
 
+#include "random.hpp"
 #include "house.hpp"
 
 HouseWall::HouseWall(const Common::Vector2& start, const Common::Vector2& end, float width,
@@ -58,7 +59,7 @@ House::House(const Common::Vector3& p1,
 	auto ext3 = (mp[3] - mp[2]).normalized() * halfwidth;
 
 	mFloor = p1.y;
-	mRoof = mFloor + (rand() % 20 + 20) * 0.1f;
+	mRoof = mFloor + Random::uniform(Random::SourceWorld, 2.0f, 4.0f);
 
 	mWalls.push_back(HouseWall(mp[0] + ext0, mp[1] - ext0, halfwidth, 0.0f, doors[0].DoorPosition));
 	mWalls.push_back(HouseWall(mp[2] + ext1, mp[0] - ext1, halfwidth, 0.0f, 0.0f));

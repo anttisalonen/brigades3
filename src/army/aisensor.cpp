@@ -1,6 +1,7 @@
 #include <common/Math.h>
 
 #include "aisensor.hpp"
+#include "random.hpp"
 
 SoldierKnowledge::SoldierKnowledge(unsigned int id, const Common::Vector3& pos)
 	: mLastKnownPosition(pos),
@@ -9,11 +10,17 @@ SoldierKnowledge::SoldierKnowledge(unsigned int id, const Common::Vector3& pos)
 {
 }
 
+AISensor::AISensor()
+	: mTimer(0.2f)
+{
+}
+
 AISensor::AISensor(const WorldMap* wmap, const Soldiers* soldiers, unsigned int id)
 	: mMap(wmap),
 	mSoldiers(soldiers),
 	mPhys(soldiers->getPhys(id)),
-	mID(id)
+	mID(id),
+	mTimer(0.2f, Random::uniform(Random::SourceAI))
 {
 }
 

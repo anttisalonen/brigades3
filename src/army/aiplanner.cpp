@@ -1,5 +1,4 @@
-#include <common/Random.h>
-
+#include "random.hpp"
 #include "aiplanner.hpp"
 
 AIPlanner::AIPlanner(const WorldMap* wmap, const SoldierPhysics* phys)
@@ -24,8 +23,8 @@ void AIPlanner::updateTask(const AISensor& sensor)
 		AITask t;
 		t.Type = AITask::Type::Move;
 		auto w2 = mMap->getWidth() * 0.5f;
-		auto xtgt = Common::Random::clamped() * w2 + w2;
-		auto ytgt = Common::Random::clamped() * w2 + w2;
+		auto xtgt = Random::clamped(Random::SourceAI) * w2 + w2;
+		auto ytgt = Random::clamped(Random::SourceAI) * w2 + w2;
 		if(mMap->getHeightAt(xtgt, ytgt) > 0.0f) {
 			t.Vec = Common::Vector3(xtgt, 0.0f, ytgt);
 			mCurrTask = t;

@@ -18,7 +18,7 @@ include_directories(${SDL_INCLUDE_DIR})
 include_directories(src)
 
 
-add_executable(army src/army/sound.cpp src/army/house.cpp src/army/worldmap.cpp
+add_executable(army src/army/sound.cpp src/army/random.cpp src/army/house.cpp src/army/worldmap.cpp
 	src/army/weapon.cpp src/army/soldierphysics.cpp src/army/bulletphysics.cpp
 	src/army/hittable.cpp src/army/bullets.cpp src/army/soldiers.cpp
 	src/army/aisensor.cpp src/army/aiplanner.cpp src/army/aiactor.cpp

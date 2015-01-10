@@ -25,7 +25,7 @@ class SoldierKnowledge {
 
 class AISensor {
 	public:
-		AISensor() = default;
+		AISensor();
 		AISensor(const WorldMap* wmap, const Soldiers* soldiers, unsigned int id);
 		void update(float dt);
 		std::vector<SoldierKnowledge> getCurrentlySeenEnemies() const;

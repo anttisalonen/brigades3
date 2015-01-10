@@ -3,12 +3,13 @@
 #include <map>
 
 #include <string.h>
+#include <stdlib.h>
 
 #include <sscene/Scene.h>
 
 #include <common/Math.h>
-#include <common/Random.h>
 #include <common/DriverFramework.h>
+#include <common/Random.h>
 
 #include "sound.hpp"
 #include "worldmap.hpp"
@@ -49,6 +50,10 @@ bool WindowFocus::getWindowFocus()
 struct Constants {
 	unsigned int NumSoldiers = 4;
 	AIConstants AIConstants = { 0.5f, 0.5f };
+	unsigned int WorldRandomSeed = 0;
+	unsigned int GameRandomSeed = 0;
+	unsigned int AIRandomSeed = 0;
+	float DeterministicStep = 0;
 };
 
 class World {
@@ -308,6 +313,9 @@ class App {
 App::App(const Constants& c)
 	: mDriver(c)
 {
+	if(c.DeterministicStep) {
+		mDriver.setFixedTime(c.DeterministicStep, false);
+	}
 }
 
 void App::go()
@@ -324,11 +332,35 @@ int main(int argc, char** argv)
 		} else if(!strcmp(argv[i], "--shotskill")) {
 			c.AIConstants.AvgShootingSkill = atof(argv[++i]);
 			c.AIConstants.MaxShootingSkillVariation = 0.0f;
+		} else if(!strcmp(argv[i], "--worldseed")) {
+			c.WorldRandomSeed = atoi(argv[++i]);
+		} else if(!strcmp(argv[i], "--gameseed")) {
+			c.GameRandomSeed = atoi(argv[++i]);
+		} else if(!strcmp(argv[i], "--aiseed")) {
+			c.AIRandomSeed = atoi(argv[++i]);
+		} else if(!strcmp(argv[i], "--deterministic")) {
+			c.DeterministicStep = atoi(argv[++i]);
 		} else {
 			fprintf(stderr, "Unknown option \"%s\"\n", argv[i]);
 			return 1;
 		}
 	}
+
+	int timeseed = time(NULL);
+	std::cout << "Using time seed " << timeseed << "\n";
+	if(!c.WorldRandomSeed) {
+		c.WorldRandomSeed = timeseed;
+	}
+	if(!c.GameRandomSeed) {
+		c.GameRandomSeed = timeseed;
+	}
+	if(!c.AIRandomSeed) {
+		c.AIRandomSeed = timeseed;
+	}
+
+	Random::seed(Random::SourceWorld, c.WorldRandomSeed);
+	Random::seed(Random::SourceGame, c.GameRandomSeed);
+	Random::seed(Random::SourceAI, c.AIRandomSeed);
 
 	App a(c);
 	a.go();

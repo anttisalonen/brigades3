@@ -51,10 +51,9 @@ void Soldiers::update(float dt)
 void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets, unsigned int numSoldiers)
 {
 	mPlayerSoldierIndex = 0;
-	std::default_random_engine gen((unsigned int)time(0));
 	for(unsigned int i = 0; i < numSoldiers; i++) {
 		mPhysics[i] = SoldierPhysics(wmap, 5.0f, 0.10f, 1.0f);
-		auto pos = wmap->findFreeSpot(100, gen);
+		auto pos = wmap->findFreeSpot(100, Random::SourceGame);
 		if(pos.null()) {
 			throw std::runtime_error("No space for a soldier in the world");
 		}

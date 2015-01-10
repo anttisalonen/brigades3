@@ -10,6 +10,7 @@
 
 #include <noise/noise.h>
 
+#include "random.hpp"
 #include "house.hpp"
 
 struct Tree {
@@ -39,7 +40,7 @@ class WorldMap {
 		bool lineBlockedByLand(const Common::Vector3& p1, const Common::Vector3& p2, Common::Vector3* hit) const;
 		float lineBlockedByTrees(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const;
 		float getWidth() const;
-		Common::Vector3 findFreeSpot(unsigned int tries, std::default_random_engine& gen) const;
+		Common::Vector3 findFreeSpot(unsigned int tries, Random::Source rs) const;
 		const std::vector<House>& getHousesAt(float x, float y, float r) const;
 		Common::Vector3 pointToVec(float x, float y) const;
 		float getHeightOnCollisionPoint(const Common::Vector3& p1, const Common::Vector3& p2,
@@ -49,14 +50,12 @@ class WorldMap {
 	private:
 		void addHouses();
 		void addTrees();
-		Common::Vector3 findFreeSpot(unsigned int tries);
 		bool nearHouse(float x, float y, float radius, House* house) const;
 		bool isFreeSpot(float x, float y) const;
 
 		Scene::Scene& mScene;
 		std::vector<Tree> mTrees;
 
-		std::default_random_engine mGen;
 		noise::module::Perlin mNoise;
 
 		std::vector<House> mHouses;
