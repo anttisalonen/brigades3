@@ -54,6 +54,7 @@ struct Constants {
 	unsigned int GameRandomSeed = 0;
 	unsigned int AIRandomSeed = 0;
 	float DeterministicStep = 0;
+	bool Observer = false;
 };
 
 class World {
@@ -84,7 +85,7 @@ World::World(Scene::Scene& scene, const Constants& constants)
 	mSoldiers(scene),
 	mBullets(&mMap, &scene),
 	mScene(scene),
-	mObserverMode(false),
+	mObserverMode(constants.Observer),
 	mCamera(mScene.getDefaultCamera()),
 	mConstants(constants)
 {
@@ -103,6 +104,11 @@ void World::init()
 	mPlayerInput = PlayerInput(&mSoldiers);
 	mAI = AI(&mMap, &mSoldiers, mConstants.AIConstants);
 	mAI.init();
+
+	if(mObserverMode) {
+		auto w = mMap.getWidth() * 0.5f;
+		mCamera.setPosition(mMap.pointToVec(w, w) + Common::Vector3(0.0f, 20.0f, 0.0f));
+	}
 }
 
 void World::update(float dt)
@@ -340,6 +346,8 @@ int main(int argc, char** argv)
 			c.AIRandomSeed = atoi(argv[++i]);
 		} else if(!strcmp(argv[i], "--deterministic")) {
 			c.DeterministicStep = atoi(argv[++i]);
+		} else if(!strcmp(argv[i], "--observer")) {
+			c.Observer = true;
 		} else {
 			fprintf(stderr, "Unknown option \"%s\"\n", argv[i]);
 			return 1;
