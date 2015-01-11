@@ -40,6 +40,11 @@ float HouseWall::getDoorPosition() const
 	return mDoorPos;
 }
 
+Common::Vector2 HouseWall::getNormal() const
+{
+	return Common::Math::rotate2D(mEnd - mStart, -HALF_PI).normalized();
+}
+
 House::House(const Common::Vector3& p1,
 		const Common::Vector3& p2,
 		const Common::Vector3& p3,
@@ -123,8 +128,8 @@ std::pair<std::vector<Common::Vector3>, std::vector<Common::Vector3>> House::get
 		auto halfwidth = wall.getWallHalfWidth();
 
 		std::vector<Common::Vector2> norms = {
-			Common::Math::rotate2D(end - start, HALF_PI).normalized() * halfwidth,
-			Common::Math::rotate2D(end - start, -HALF_PI).normalized() * halfwidth,
+			wall.getNormal() * -halfwidth,
+			wall.getNormal() * halfwidth,
 		};
 
 		for(unsigned int i = 0; i < 2; i++) {

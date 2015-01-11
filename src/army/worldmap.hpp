@@ -45,7 +45,8 @@ class WorldMap {
 		Common::Vector3 pointToVec(float x, float y) const;
 		float getHeightOnCollisionPoint(const Common::Vector3& p1, const Common::Vector3& p2,
 				const Common::Vector2& collpoint) const;
-		float lineBlockedByWalls(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const;
+		float lineBlockedByWalls(const Common::Vector3& p1, const Common::Vector3& p2,
+				Common::Vector3* nearest, HouseWall* hitwall = nullptr) const;
 
 	private:
 		void addHouses();

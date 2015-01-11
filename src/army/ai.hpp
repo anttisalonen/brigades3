@@ -3,6 +3,8 @@
 
 #include <vector>
 
+#include <sscene/Scene.h>
+
 #include "worldmap.hpp"
 #include "hittable.hpp"
 #include "soldiers.hpp"
@@ -30,12 +32,13 @@ class AIComponent {
 struct AIConstants {
 	float AvgShootingSkill;
 	float MaxShootingSkillVariation;
+	bool AIDebug;
 };
 
 class AI {
 	public:
 		AI() = default;
-		AI(const WorldMap* wmap, Soldiers* soldiers, const AIConstants& aic);
+		AI(const WorldMap* wmap, Soldiers* soldiers, const AIConstants& aic, Scene::Scene* scene);
 		void init();
 		void update(float dt);
 
@@ -45,6 +48,7 @@ class AI {
 		std::vector<AIComponent> mAIs;
 		unsigned int mNumAIs;
 		AIConstants mAIConstants;
+		Scene::Scene* mScene;
 };
 
 #endif

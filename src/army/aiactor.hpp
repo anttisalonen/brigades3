@@ -10,13 +10,15 @@
 class AIActor {
 	public:
 		AIActor() = default;
-		AIActor(SoldierPhysics* phys, ShooterComponent* shooter, float shootingSkill);
+		AIActor(const WorldMap* wmap, SoldierPhysics* phys, ShooterComponent* shooter, float shootingSkill, unsigned int id);
 		void execute(const AITask& t);
 
 	private:
+		const WorldMap* mMap;
 		SoldierPhysics* mPhys;
 		ShooterComponent* mShooter;
 		float mVariation;
+		unsigned int mID;
 };
 
 #endif

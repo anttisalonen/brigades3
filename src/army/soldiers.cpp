@@ -1,3 +1,5 @@
+#include <sstream>
+
 #include "soldiers.hpp"
 
 RenderComponent::RenderComponent(Scene::Scene& scene,
@@ -33,6 +35,7 @@ Soldiers::Soldiers(Scene::Scene& scene)
 	mRenders.resize(MAX_SOLDIERS);
 	mShooters.resize(MAX_SOLDIERS);
 	mHittables.resize(MAX_SOLDIERS);
+	mSoldierNames.resize(MAX_SOLDIERS);
 }
 
 void Soldiers::update(float dt)
@@ -61,6 +64,12 @@ void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets, unsigned int 
 		mShooters[i] = ShooterComponent(&mPhysics[i], bullets, i);
 		mHittables[i] = HittableComponent(&mPhysics[i], 0.3f, 1.7f);
 		mRenders[i] = RenderComponent(mScene, &mPhysics[i], &mHittables[i], i);
+
+		{
+			std::stringstream ss;
+			ss << "Soldier " << i;
+			mSoldierNames[i] = ss.str();
+		}
 	}
 
 	mNumSoldiers = numSoldiers;
@@ -166,4 +175,8 @@ bool Soldiers::soldierIsAlive(unsigned int i) const
 	return !mHittables[i].hasDied();
 }
 
+const std::string& Soldiers::getName(unsigned int i) const
+{
+	return mSoldierNames[i];
+}
 

@@ -285,7 +285,7 @@ float WorldMap::lineBlockedByObstacles(const Common::Vector3& p1, const Common::
 	Common::Vector3 nearestTree;
 	Common::Vector3 nearestWall;
 	auto treeRet = lineBlockedByTrees(p1, p2, bullet, &nearestTree);
-	auto wallRet = lineBlockedByWalls(p1, p2, bullet, &nearestWall);
+	auto wallRet = lineBlockedByWalls(p1, p2, &nearestWall);
 	if(treeRet && wallRet) {
 		if(p1.distance2(nearestTree) < p1.distance2(nearestWall)) {
 			if(nearest)
@@ -353,7 +353,8 @@ float WorldMap::lineBlockedByTrees(const Common::Vector3& p1, const Common::Vect
 	return obscoeff;
 }
 
-float WorldMap::lineBlockedByWalls(const Common::Vector3& p1, const Common::Vector3& p2, bool bullet, Common::Vector3* nearest) const
+float WorldMap::lineBlockedByWalls(const Common::Vector3& p1, const Common::Vector3& p2,
+		Common::Vector3* nearest, HouseWall* hitwall) const
 {
 	// TODO: this doesn't check for collision against the roof
 	Common::Vector2 mp = Common::Vector2(p2.x, p2.z);
@@ -388,6 +389,8 @@ float WorldMap::lineBlockedByWalls(const Common::Vector3& p1, const Common::Vect
 						distToNearest = thisDist;
 						if(nearest)
 							*nearest = hitpoint3;
+						if(hitwall)
+							*hitwall = wall;
 					}
 				}
 			}

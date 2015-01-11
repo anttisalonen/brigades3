@@ -1,11 +1,12 @@
 #include "random.hpp"
 #include "ai.hpp"
+#include "aistatic.hpp"
 
 AIComponent::AIComponent(const WorldMap* wmap, Soldiers* soldiers, unsigned int id, float shootingSkill)
 	: mSoldiers(soldiers),
 	mSensor(wmap, soldiers, id),
 	mPlanner(wmap, soldiers->getPhys(id)),
-	mActor(soldiers->getPhys(id), soldiers->getShooter(id), shootingSkill),
+	mActor(wmap, soldiers->getPhys(id), soldiers->getShooter(id), shootingSkill, id),
 	mPhys(soldiers->getPhys(id)),
 	mShooter(soldiers->getShooter(id)),
 	mHittable(soldiers->getHittable(id))
@@ -22,16 +23,21 @@ void AIComponent::update(float dt)
 	mActor.execute(task);
 }
 
-AI::AI(const WorldMap* wmap, Soldiers* soldiers, const AIConstants& aic)
+AI::AI(const WorldMap* wmap, Soldiers* soldiers, const AIConstants& aic, Scene::Scene* scene)
 	: mMap(wmap),
 	mSoldiers(soldiers),
-	mAIConstants(aic)
+	mAIConstants(aic),
+	mScene(scene)
 {
+	if(aic.AIDebug)
+		AIStatic::Debug::enable();
 	mAIs.resize(Soldiers::MAX_SOLDIERS);
 }
 
 void AI::init()
 {
+	AIStatic::setWorldMap(mMap);
+	AIStatic::Debug::setScene(mScene);
 	mNumAIs = mSoldiers->getNumSoldiers();
 	for(unsigned int i = 0; i < mNumAIs; i++) {
 		auto shootingSkill = mAIConstants.AvgShootingSkill +

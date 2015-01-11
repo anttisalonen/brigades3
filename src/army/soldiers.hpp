@@ -47,6 +47,7 @@ class Soldiers {
 		unsigned int getPlayerSoldierIndex() const;
 		std::vector<unsigned int> getSoldiersAt(const Common::Vector3& pos, float radius) const;
 		bool soldierIsAlive(unsigned int i) const;
+		const std::string& getName(unsigned int i) const;
 
 		static const unsigned int MAX_SOLDIERS = 256;
 
@@ -56,6 +57,7 @@ class Soldiers {
 		std::vector<RenderComponent> mRenders;
 		std::vector<ShooterComponent> mShooters;
 		std::vector<HittableComponent> mHittables;
+		std::vector<std::string> mSoldierNames;
 
 		Scene::Scene& mScene;
 		unsigned int mPlayerSoldierIndex;

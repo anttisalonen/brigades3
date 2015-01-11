@@ -32,7 +32,7 @@ void BulletPhysics::checkLandCollision(const Common::Vector3& oldpos)
 void BulletPhysics::checkWallCollision(const Common::Vector3& oldpos)
 {
 	Common::Vector3 nearest;
-	auto ret = mMap->lineBlockedByWalls(oldpos, mPosition, true, &nearest);
+	auto ret = mMap->lineBlockedByWalls(oldpos, mPosition, &nearest);
 	if(ret) {
 		mPosition = nearest;
 		mVelocity.zero();

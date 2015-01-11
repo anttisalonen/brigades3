@@ -1,14 +1,19 @@
+#include <float.h>
+
 #include <common/Math.h>
 
 #include "random.hpp"
 #include "aiactor.hpp"
+#include "aistatic.hpp"
 
 class Steering {
 	public:
-		Steering(const SoldierPhysics* phys);
-		void arrive(const Common::Vector3& tgt, float radius);
+		Steering(const WorldMap* wmap, const SoldierPhysics* phys);
+		void seek(const Common::Vector3& tgt);
+		void avoidWalls();
 		void turnTowards(float tgt);
 		void turnTowards(const Common::Vector3& tgt);
+		void lookWhereYoureGoing();
 		const Common::Vector3& getAcceleration() const;
 		float getRotation() const;
 
@@ -17,19 +22,67 @@ class Steering {
 		void addAcceleration(const Common::Vector3& acc);
 
 		const SoldierPhysics* mPhys;
+		const WorldMap* mMap;
 		Common::Vector3 mAcceleration;
 		float mRotation = 0.0f;
 };
 
-Steering::Steering(const SoldierPhysics* phys)
-	: mPhys(phys)
+Steering::Steering(const WorldMap* wmap, const SoldierPhysics* phys)
+	: mPhys(phys),
+	mMap(wmap)
 {
 }
 
-void Steering::arrive(const Common::Vector3& tgt, float radius)
+void Steering::seek(const Common::Vector3& tgt)
 {
 	auto diff = tgt - mPhys->getPosition();
 	addAcceleration(diff);
+}
+
+void Steering::avoidWalls()
+{
+	static const float LookAhead = 5.0f; // meters
+	static const float AvoidDistance = 5.0f; // meters
+
+	auto rayVec = Common::Vector2(mPhys->getVelocity().x, mPhys->getVelocity().z);
+	if(rayVec.null())
+		return;
+
+	rayVec.normalize();
+	rayVec *= LookAhead;
+
+	Common::Vector2 feelers[] = {
+		rayVec,
+		Common::Math::rotate2D(rayVec, 0.4f),
+		Common::Math::rotate2D(rayVec, -0.4f),
+		// add one to the back and side to resolve equilibrium
+		Common::Math::rotate2D(rayVec, 0.4f) * -1.0f,
+	};
+
+	const auto& pos = mPhys->getPosition();
+
+	float maxdist2 = FLT_MAX;
+	AIStatic::Collision worstcoll;
+	for(auto& f : feelers) {
+		auto f3 = mMap->pointToVec(f.x, f.y) + Common::Vector3(0.0f, 1.0f, 0.0f);
+		auto coll = AIStatic::getCollision(pos, pos + f3);
+
+		if(!coll.Found)
+			continue;
+
+		auto thisdist2 = coll.Position.distance2(pos);
+		if(thisdist2 < maxdist2) {
+			maxdist2 = thisdist2;
+			worstcoll = coll;
+		}
+	}
+
+	if(!worstcoll.Found)
+		return;
+
+	auto tgt = worstcoll.Position + Common::Vector3(worstcoll.Normal.x, 0.0f, worstcoll.Normal.y) * AvoidDistance;
+	auto diff = tgt - mPhys->getPosition();
+	addAcceleration(diff * 100.0f);
 }
 
 void Steering::turnTowards(float tgtyaw)
@@ -45,6 +98,11 @@ void Steering::turnTowards(const Common::Vector3& tgt)
 	auto tgtvec = tgt - mPhys->getPosition();
 	auto tgtyaw = atan2(tgtvec.z, tgtvec.x);
 	turnTowards(tgtyaw);
+}
+
+void Steering::lookWhereYoureGoing()
+{
+	turnTowards(mPhys->getPosition() + mAcceleration);
 }
 
 const Common::Vector3& Steering::getAcceleration() const
@@ -70,9 +128,11 @@ float Steering::accelLeft() const
 	return SoldierPhysics::RunAcceleration - mAcceleration.length();
 }
 
-AIActor::AIActor(SoldierPhysics* phys, ShooterComponent* shooter, float shootingSkill)
-	: mPhys(phys),
-	mShooter(shooter)
+AIActor::AIActor(const WorldMap* wmap, SoldierPhysics* phys, ShooterComponent* shooter, float shootingSkill, unsigned int id)
+	: mMap(wmap),
+	mPhys(phys),
+	mShooter(shooter),
+	mID(id)
 {
 	shootingSkill = Common::clamp(0.0f, shootingSkill, 1.0f);
 	mVariation = (1.0f - shootingSkill) * 0.3f;
@@ -86,10 +146,15 @@ void AIActor::execute(const AITask& t)
 
 		case AITask::Type::Move:
 			{
-				Steering st(mPhys);
-				st.arrive(t.Vec, 5.0f);
-				st.turnTowards(t.Vec);
+				Steering st(mMap, mPhys);
+				st.avoidWalls();
+				st.seek(t.Vec);
+				st.lookWhereYoureGoing();
 				auto accel = st.getAcceleration();
+				AIStatic::Debug::drawLine(mID, "Moving",
+						mPhys->getPosition() + Common::Vector3(0.0f, 1.5f, 0.0f),
+						mPhys->getPosition() + accel + Common::Vector3(0.0f, 1.5f, 0.0f),
+						Common::Color::Blue);
 				if(accel.length() > 0.1f) {
 					mPhys->addMovementAcceleration(accel);
 				}
@@ -105,7 +170,7 @@ void AIActor::execute(const AITask& t)
 				// yaw
 				auto tgtvec = t.Vec - mPhys->getPosition();
 				auto tgtyaw = atan2(tgtvec.z, tgtvec.x);
-				Steering st(mPhys);
+				Steering st(mMap, mPhys);
 				st.turnTowards(tgtyaw + Random::clamped(Random::SourceAI) * mVariation);
 				auto diffyaw = st.getRotation();
 

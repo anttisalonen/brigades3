@@ -11,11 +11,13 @@ class HouseWall {
 	public:
 		HouseWall(const Common::Vector2& start, const Common::Vector2& end, float halfwidth,
 				float windowpos, float doorpos);
+		HouseWall() = default;
 		const Common::Vector2& getStart() const;
 		const Common::Vector2& getEnd() const;
 		float getWallHalfWidth() const;
 		float getWindowPosition() const;
 		float getDoorPosition() const;
+		Common::Vector2 getNormal() const;
 
 	private:
 		Common::Vector2 mStart;

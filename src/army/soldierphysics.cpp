@@ -18,8 +18,8 @@ void SoldierPhysics::update(float dt)
 	mMovementAcceleration.zero();
 	PhysicsCommon<SoldierPhysics>::update(dt, *this);
 
-	mYawVelocity = Common::clamp(-1.2f, mYawVelocity, 1.2f);
-	mPitchVelocity = Common::clamp(-1.2f, mPitchVelocity, 1.2f);
+	mYawVelocity = Common::clamp(-10.0f, mYawVelocity, 10.0f);
+	mPitchVelocity = Common::clamp(-10.0f, mPitchVelocity, 10.0f);
 	mOrientation = mOrientation *
 		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), mYawVelocity * dt);
 	mAimPitch = Common::clamp<float>(-HALF_PI * 0.6f, mAimPitch + mPitchVelocity * dt, HALF_PI * 0.6f);

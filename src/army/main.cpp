@@ -49,7 +49,7 @@ bool WindowFocus::getWindowFocus()
 
 struct Constants {
 	unsigned int NumSoldiers = 4;
-	AIConstants AIConstants = { 0.5f, 0.5f };
+	AIConstants AIConstants = { 0.5f, 0.5f, false };
 	unsigned int WorldRandomSeed = 0;
 	unsigned int GameRandomSeed = 0;
 	unsigned int AIRandomSeed = 0;
@@ -102,7 +102,7 @@ void World::init()
 	mMap.create();
 	mSoldiers.addSoldiers(&mMap, &mBullets, mConstants.NumSoldiers);
 	mPlayerInput = PlayerInput(&mSoldiers);
-	mAI = AI(&mMap, &mSoldiers, mConstants.AIConstants);
+	mAI = AI(&mMap, &mSoldiers, mConstants.AIConstants, &mScene);
 	mAI.init();
 
 	if(mObserverMode) {
@@ -348,6 +348,8 @@ int main(int argc, char** argv)
 			c.DeterministicStep = atoi(argv[++i]);
 		} else if(!strcmp(argv[i], "--observer")) {
 			c.Observer = true;
+		} else if(!strcmp(argv[i], "--aidebug")) {
+			c.AIConstants.AIDebug = true;
 		} else {
 			fprintf(stderr, "Unknown option \"%s\"\n", argv[i]);
 			return 1;
