@@ -12,12 +12,12 @@ class SoldierPhysics {
 		SoldierPhysics() = default;
 		SoldierPhysics(const WorldMap* wmap, float maxvel, float damping, float friction);
 		void update(float dt);
-		void addAcceleration(const Common::Vector3& vec);
+		void addMovementAcceleration(const Common::Vector3& vec);
 		const Common::Vector3& getPosition() const { return mPosition; }
 		const Common::Vector3& getVelocity() const { return mVelocity; }
 		const Common::Quaternion& getOrientation() const { return mOrientation; }
 		Common::Quaternion getAimPitch() const;
-		void rotate(float yaw, float pitch);
+		void addRotation(float yaw, float pitch);
 
 		void setPosition(const Common::Vector3& pos) { mPosition = pos; }
 		void setOrientation(const Common::Quaternion& ori) { mOrientation = ori; }
@@ -36,6 +36,7 @@ class SoldierPhysics {
 		Common::Vector3 mPosition;
 		Common::Vector3 mVelocity;
 		Common::Vector3 mAcceleration;
+		Common::Vector3 mMovementAcceleration;
 		Common::Quaternion mOrientation;
 		float mAimPitch;
 		const WorldMap* mMap;
@@ -43,6 +44,8 @@ class SoldierPhysics {
 		float mDamping;
 		float mFriction;
 		bool mAiming;
+		float mPitchVelocity = 0.0f;
+		float mYawVelocity = 0.0f;
 
 		friend class PhysicsCommon<SoldierPhysics>;
 };

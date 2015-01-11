@@ -14,7 +14,18 @@ SoldierPhysics::SoldierPhysics(const WorldMap* wmap, float maxvel, float damping
 
 void SoldierPhysics::update(float dt)
 {
+	mAcceleration += mMovementAcceleration;
+	mMovementAcceleration.zero();
 	PhysicsCommon<SoldierPhysics>::update(dt, *this);
+
+	mYawVelocity = Common::clamp(-1.2f, mYawVelocity, 1.2f);
+	mPitchVelocity = Common::clamp(-1.2f, mPitchVelocity, 1.2f);
+	mOrientation = mOrientation *
+		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), mYawVelocity * dt);
+	mAimPitch = Common::clamp<float>(-HALF_PI * 0.6f, mAimPitch + mPitchVelocity * dt, HALF_PI * 0.6f);
+
+	mYawVelocity = 0.0f;
+	mPitchVelocity = 0.0f;
 }
 
 void SoldierPhysics::checkLandCollision(const Common::Vector3& oldpos)
@@ -90,12 +101,15 @@ void SoldierPhysics::checkWallCollision(const Common::Vector3& oldpos)
 	}
 }
 
-void SoldierPhysics::addAcceleration(const Common::Vector3& vec)
+void SoldierPhysics::addMovementAcceleration(const Common::Vector3& vec)
 {
 	if(mAiming)
 		return;
 
-	mAcceleration += vec;
+	mMovementAcceleration.x += vec.x;
+	mMovementAcceleration.y = 0.0f;
+	mMovementAcceleration.z += vec.z;
+	mMovementAcceleration.truncate(RunAcceleration);
 }
 
 Common::Quaternion SoldierPhysics::getAimPitch() const
@@ -103,11 +117,10 @@ Common::Quaternion SoldierPhysics::getAimPitch() const
 	return Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 0.0f, 1.0f), mAimPitch);
 }
 
-void SoldierPhysics::rotate(float yaw, float pitch)
+void SoldierPhysics::addRotation(float yaw, float pitch)
 {
-	mOrientation = mOrientation *
-		Common::Quaternion::fromAxisAngle(Common::Vector3(0.0f, 1.0f, 0.0f), yaw);
-	mAimPitch = Common::clamp<float>(-HALF_PI * 0.6f, mAimPitch + pitch, HALF_PI * 0.6f);
+	mYawVelocity += yaw * 60.0f;
+	mPitchVelocity += pitch * 60.0f;
 }
 
 void SoldierPhysics::setAiming(bool a)

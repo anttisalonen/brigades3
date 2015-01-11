@@ -17,7 +17,7 @@ void PlayerInput::update(float dt)
 
 	Common::Vector3 accel;
 	accel = Common::Math::rotate3D(mInputAccel, mPhys->getOrientation());
-	mPhys->addAcceleration(accel * SoldierPhysics::RunAcceleration);
+	mPhys->addMovementAcceleration(accel * SoldierPhysics::RunAcceleration);
 }
 
 bool PlayerInput::handleKeyDown(float frameTime, SDLKey key)
@@ -97,7 +97,7 @@ bool PlayerInput::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent&
 
 	const float coeff = mPhys->isAiming() ? 0.005f : 0.02f;
 
-	mPhys->rotate(-ev.xrel * coeff, -ev.yrel * coeff);
+	mPhys->addRotation(-ev.xrel * coeff, -ev.yrel * coeff);
 	return false;
 }
 
