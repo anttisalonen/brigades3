@@ -11,6 +11,7 @@ class Steering {
 		Steering(const WorldMap* wmap, const SoldierPhysics* phys);
 		void seek(const Common::Vector3& tgt);
 		void avoidWalls();
+		void avoidTrees();
 		void turnTowards(float tgt);
 		void turnTowards(const Common::Vector3& tgt);
 		void lookWhereYoureGoing();
@@ -65,7 +66,7 @@ void Steering::avoidWalls()
 	AIStatic::Collision worstcoll;
 	for(auto& f : feelers) {
 		auto f3 = mMap->pointToVec(f.x, f.y) + Common::Vector3(0.0f, 1.0f, 0.0f);
-		auto coll = AIStatic::getCollision(pos, pos + f3);
+		auto coll = AIStatic::getWallCollision(pos, pos + f3);
 
 		if(!coll.Found)
 			continue;
@@ -83,6 +84,37 @@ void Steering::avoidWalls()
 	auto tgt = worstcoll.Position + Common::Vector3(worstcoll.Normal.x, 0.0f, worstcoll.Normal.y) * AvoidDistance;
 	auto diff = tgt - mPhys->getPosition();
 	addAcceleration(diff * 100.0f);
+}
+
+void Steering::avoidTrees()
+{
+	auto myvel = Common::Vector2(-mPhys->getVelocity().x, -mPhys->getVelocity().z);
+	auto speed = myvel.length();
+	if(speed < 0.02f)
+		return;
+
+	auto mypos = Common::Vector2(mPhys->getPosition().x, mPhys->getPosition().z);
+	auto trees = mMap->getTreesAt(mypos.x, mypos.y, 5.0f + speed);
+	Common::Vector2 firstRelPos;
+
+	float minTime = FLT_MAX;
+	for(const auto& tree : trees) {
+		auto relpos = Common::Vector2(tree.Position.x - mypos.x, tree.Position.z - mypos.y);
+		auto timeToColl = relpos.dot(myvel) / (speed * speed);
+		auto minsep = relpos.length() - speed * timeToColl;
+		if(minsep > tree.Radius + 1.0f)
+			continue;
+
+		if(timeToColl > 0 && timeToColl < minTime) {
+			minTime = timeToColl;
+			firstRelPos = relpos;
+		}
+	}
+
+	if(minTime > 1.0f)
+		return;
+
+	addAcceleration(Common::Vector3(firstRelPos.x, 0.0f, firstRelPos.y) * -10.0f * (1.0f / minTime));
 }
 
 void Steering::turnTowards(float tgtyaw)
@@ -148,6 +180,7 @@ void AIActor::execute(const AITask& t)
 			{
 				Steering st(mMap, mPhys);
 				st.avoidWalls();
+				st.avoidTrees();
 				st.seek(t.Vec);
 				st.lookWhereYoureGoing();
 				auto accel = st.getAcceleration();

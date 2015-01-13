@@ -9,7 +9,7 @@ void AIStatic::setWorldMap(const WorldMap* wmap)
 	mMap = wmap;
 }
 
-AIStatic::Collision AIStatic::getCollision(const Common::Vector3& pos, const Common::Vector3& endpos)
+AIStatic::Collision AIStatic::getWallCollision(const Common::Vector3& pos, const Common::Vector3& endpos)
 {
 	Collision coll;
 	HouseWall wall;

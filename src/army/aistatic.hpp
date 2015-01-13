@@ -14,7 +14,7 @@ class AIStatic {
 		};
 
 		static void setWorldMap(const WorldMap* wmap);
-		static Collision getCollision(const Common::Vector3& pos, const Common::Vector3& endpos);
+		static Collision getWallCollision(const Common::Vector3& pos, const Common::Vector3& endpos);
 
 		class Debug {
 			public:
