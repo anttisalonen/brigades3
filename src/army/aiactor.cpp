@@ -174,10 +174,12 @@ void AIActor::execute(const AITask& t)
 {
 	switch(t.Type) {
 		case AITask::Type::Idle:
+			mPhys->setAiming(false);
 			break;
 
 		case AITask::Type::Move:
 			{
+				mPhys->setAiming(false);
 				Steering st(mMap, mPhys);
 				st.avoidWalls();
 				st.avoidTrees();
@@ -200,6 +202,7 @@ void AIActor::execute(const AITask& t)
 
 		case AITask::Type::Shoot:
 			{
+				mPhys->setAiming(true);
 				// yaw
 				auto tgtvec = t.Vec - mPhys->getPosition();
 				auto tgtyaw = atan2(tgtvec.z, tgtvec.x);

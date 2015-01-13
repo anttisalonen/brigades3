@@ -68,12 +68,15 @@ class World {
 		bool handleMousePress(float frameTime, Uint8 button);
 
 	private:
+		void setCameraForSoldier(unsigned int soldierIndex);
+
 		WorldMap mMap;
 		Soldiers mSoldiers;
 		Bullets mBullets;
 		AI mAI;
 		Scene::Scene& mScene;
 		bool mObserverMode;
+		unsigned int mObservedSoldier = UINT_MAX;
 		Scene::Camera& mCamera;
 		PlayerInput mPlayerInput;
 		std::map<SDLKey, std::function<void (float)>> mControls;
@@ -113,12 +116,6 @@ void World::init()
 
 void World::update(float dt)
 {
-	if(mObserverMode) {
-		mCamera.applyMovementKeys(dt);
-		Sound::setCamera(mCamera.getPosition(), mCamera.getTargetVector());
-		mScene.setOverlayEnabled("Sight", false);
-	}
-
 	mSoldiers.update(dt);
 	mPlayerInput.update(dt);
 	mAI.update(dt);
@@ -127,19 +124,36 @@ void World::update(float dt)
 	auto hits = mBullets.checkForHits(mSoldiers.getHittables());
 	mSoldiers.processHits(hits);
 
-	if(!mObserverMode) {
-		auto ori = mSoldiers.getPlayerSoldierOrientation();
-		auto tgt = Common::Math::rotate3D(Scene::WorldForward, ori);
-		auto up = Common::Math::rotate3D(Scene::WorldUp, ori);
-
-		mCamera.setPosition(mSoldiers.getPlayerSoldierPosition() +
-				Common::Vector3(0.0f, 1.7f, 0.0f) +
-				tgt.normalized() * 0.5f);
-		mCamera.lookAt(tgt, up);
-		Sound::setCamera(mCamera.getPosition(), mCamera.getTargetVector());
-		mScene.setOverlayEnabled("Sight", mSoldiers.getPlayerSoldierAiming());
+	if(mObserverMode) {
+		mScene.setOverlayEnabled("Sight", false);
+		if(mObservedSoldier == UINT_MAX) {
+			mCamera.applyMovementKeys(dt);
+		} else {
+			setCameraForSoldier(mObservedSoldier);
+			mScene.setFOV(90.0f);
+		}
+	} else {
+		setCameraForSoldier(mSoldiers.getPlayerSoldierIndex());
 		mScene.setFOV(mPlayerInput.getFOV());
 	}
+	Sound::setCamera(mCamera.getPosition(), mCamera.getTargetVector());
+}
+
+void World::setCameraForSoldier(unsigned int soldierIndex)
+{
+	auto ori = mSoldiers.getSoldierOrientation(soldierIndex);
+	auto tgt = Common::Math::rotate3D(Scene::WorldForward, ori);
+	auto up = Common::Math::rotate3D(Scene::WorldUp, ori);
+
+	if(!mSoldiers.soldierIsAlive(soldierIndex)) {
+		up = Common::Math::rotate3D(up, HALF_PI, Common::Vector3(1.0f, 0.0f, 0.0f));
+	}
+
+	mCamera.setPosition(mSoldiers.getSoldierPosition(soldierIndex) +
+			Common::Vector3(0.0f, 1.7f, 0.0f) +
+			tgt.normalized() * 0.5f);
+	mCamera.lookAt(tgt, up);
+	mScene.setOverlayEnabled("Sight", mSoldiers.getSoldierAiming(soldierIndex));
 }
 
 bool World::handleKeyDown(float frameTime, SDLKey key)
@@ -170,6 +184,36 @@ bool World::handleKeyDown(float frameTime, SDLKey key)
 		mObserverMode = !mObserverMode;
 		return false;
 	}
+	if(key == SDLK_F2 && mObserverMode) {
+		if(mObservedSoldier == UINT_MAX) {
+			mObservedSoldier = 0;
+		} else {
+			mObservedSoldier++;
+		}
+		if(mObservedSoldier >= mSoldiers.getNumSoldiers()) {
+			mObservedSoldier = UINT_MAX;
+		}
+		std::cout << "Observed soldier: " << mObservedSoldier << "\n";
+		return false;
+	}
+	if(key == SDLK_F3 && mObserverMode) {
+		if(mObservedSoldier == UINT_MAX) {
+			if(mSoldiers.getNumSoldiers() > 0) {
+				mObservedSoldier = mSoldiers.getNumSoldiers() - 1;
+			}
+		} else if(mObservedSoldier == 0) {
+			mObservedSoldier = UINT_MAX;
+		} else {
+			mObservedSoldier--;
+		}
+		std::cout << "Observed soldier: " << mObservedSoldier << "\n";
+		return false;
+	}
+	if(key == SDLK_F1) {
+		mObserverMode = !mObserverMode;
+		return false;
+	}
+
 
 	if(mObserverMode) {
 		auto it = mControls.find(key);

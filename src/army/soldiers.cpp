@@ -89,9 +89,20 @@ Common::Quaternion Soldiers::getPlayerSoldierOrientation() const
 	return mPhysics[mPlayerSoldierIndex].getOrientation() * mPhysics[mPlayerSoldierIndex].getAimPitch();
 }
 
+Common::Quaternion Soldiers::getSoldierOrientation(unsigned int i) const
+{
+	assert(i < mNumSoldiers);
+	return mPhysics[i].getOrientation() * mPhysics[i].getAimPitch();
+}
+
 bool Soldiers::getPlayerSoldierAiming() const
 {
 	return mPhysics[mPlayerSoldierIndex].isAiming();
+}
+
+bool Soldiers::getSoldierAiming(unsigned int i) const
+{
+	return mPhysics[i].isAiming();
 }
 
 SoldierPhysics* Soldiers::getPlayerPhysics()

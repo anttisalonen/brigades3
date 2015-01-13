@@ -32,7 +32,9 @@ class Soldiers {
 		void addSoldiers(const WorldMap* wmap, Bullets* bullets, unsigned int numSoldiers);
 		const Common::Vector3& getPlayerSoldierPosition() const;
 		Common::Quaternion getPlayerSoldierOrientation() const;
+		Common::Quaternion getSoldierOrientation(unsigned int i) const;
 		bool getPlayerSoldierAiming() const;
+		bool getSoldierAiming(unsigned int i) const;
 		SoldierPhysics* getPlayerPhysics();
 		ShooterComponent* getPlayerShooter();
 		HittableComponent* getPlayerHittable();
