@@ -29,8 +29,14 @@ void AIPlanner::updateTask(const AISensor& sensor)
 			t.Vec = Common::Vector3(xtgt, 0.0f, ytgt);
 			mCurrTask = t;
 		} // else idle one more step
-	} else if(mCurrTask.Type == AITask::Type::Move && mPhys->getPosition().distance(mCurrTask.Vec) > 10.0f) {
-		// continue with existing task
+	} else if(mCurrTask.Type == AITask::Type::Move) {
+		if(mPhys->getPosition().distance(mCurrTask.Vec) < 10.0f) {
+			mCurrTask = AITask();
+		} else if(mCurrTask.ElapsedTime > 30.0f) {
+			std::cout << "Timeout at " << mPhys->getPosition() << "\n";
+			mCurrTask = AITask();
+		}
+		// else continue with existing task
 	} else {
 		mCurrTask = AITask();
 	}
@@ -40,6 +46,11 @@ AITask AIPlanner::getNextTask(const AISensor& sensor)
 {
 	updateTask(sensor);
 	return mCurrTask;
+}
+
+void AIPlanner::update(float dt)
+{
+	mCurrTask.ElapsedTime += dt;
 }
 
 

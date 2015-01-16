@@ -19,6 +19,7 @@ void AIComponent::update(float dt)
 		return;
 
 	mSensor.update(dt);
+	mPlanner.update(dt);
 	auto task = mPlanner.getNextTask(mSensor);
 	mActor.execute(task);
 }

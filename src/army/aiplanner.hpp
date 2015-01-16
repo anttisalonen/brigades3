@@ -17,6 +17,7 @@ class AITask {
 
 		Common::Vector3 Vec;
 		Type Type = Type::Idle;
+		float ElapsedTime = 0.0f;
 };
 
 class AIPlanner {
@@ -25,6 +26,7 @@ class AIPlanner {
 		AIPlanner(const WorldMap* wmap, const SoldierPhysics* phys);
 		AITask getNextTask(const AISensor& sensor);
 		void updateTask(const AISensor& sensor);
+		void update(float dt);
 
 	private:
 		const WorldMap* mMap;

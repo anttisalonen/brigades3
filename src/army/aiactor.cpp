@@ -21,6 +21,7 @@ class Steering {
 	private:
 		float accelLeft() const;
 		void addAcceleration(const Common::Vector3& acc);
+		void maximiseAcceleration();
 
 		const SoldierPhysics* mPhys;
 		const WorldMap* mMap;
@@ -37,13 +38,12 @@ Steering::Steering(const WorldMap* wmap, const SoldierPhysics* phys)
 void Steering::seek(const Common::Vector3& tgt)
 {
 	auto diff = tgt - mPhys->getPosition();
-	addAcceleration(diff);
+	addAcceleration(diff.normalized() * SoldierPhysics::RunAcceleration);
 }
 
 void Steering::avoidWalls()
 {
 	static const float LookAhead = 5.0f; // meters
-	static const float AvoidDistance = 5.0f; // meters
 
 	auto rayVec = Common::Vector2(mPhys->getVelocity().x, mPhys->getVelocity().z);
 	if(rayVec.null())
@@ -54,16 +54,13 @@ void Steering::avoidWalls()
 
 	Common::Vector2 feelers[] = {
 		rayVec,
-		Common::Math::rotate2D(rayVec, 0.4f),
-		Common::Math::rotate2D(rayVec, -0.4f),
-		// add one to the back and side to resolve equilibrium
-		Common::Math::rotate2D(rayVec, 0.4f) * -1.0f,
+		Common::Math::rotate2D(rayVec, QUARTER_PI),
+		Common::Math::rotate2D(rayVec, -QUARTER_PI),
 	};
 
 	const auto& pos = mPhys->getPosition();
 
-	float maxdist2 = FLT_MAX;
-	AIStatic::Collision worstcoll;
+	bool added = false;
 	for(auto& f : feelers) {
 		auto f3 = mMap->pointToVec(f.x, f.y) + Common::Vector3(0.0f, 1.0f, 0.0f);
 		auto coll = AIStatic::getWallCollision(pos, pos + f3);
@@ -71,50 +68,39 @@ void Steering::avoidWalls()
 		if(!coll.Found)
 			continue;
 
-		auto thisdist2 = coll.Position.distance2(pos);
-		if(thisdist2 < maxdist2) {
-			maxdist2 = thisdist2;
-			worstcoll = coll;
-		}
+		auto thisdist = coll.Position.distance(pos);
+		auto overshoot = LookAhead - thisdist;
+		auto acc = Common::Vector3(coll.Normal.x, 0.0f, coll.Normal.y) * overshoot * overshoot;
+		mAcceleration += acc;
+		added = true;
 	}
-
-	if(!worstcoll.Found)
-		return;
-
-	auto tgt = worstcoll.Position + Common::Vector3(worstcoll.Normal.x, 0.0f, worstcoll.Normal.y) * AvoidDistance;
-	auto diff = tgt - mPhys->getPosition();
-	addAcceleration(diff * 100.0f);
+	if(added)
+		maximiseAcceleration();
 }
 
 void Steering::avoidTrees()
 {
-	auto myvel = Common::Vector2(-mPhys->getVelocity().x, -mPhys->getVelocity().z);
+	auto myvel = Common::Vector2(mPhys->getVelocity().x, mPhys->getVelocity().z);
 	auto speed = myvel.length();
 	if(speed < 0.02f)
 		return;
 
 	auto mypos = Common::Vector2(mPhys->getPosition().x, mPhys->getPosition().z);
 	auto trees = mMap->getTreesAt(mypos.x, mypos.y, 5.0f + speed);
-	Common::Vector2 firstRelPos;
 
-	float minTime = FLT_MAX;
+	bool added = false;
 	for(const auto& tree : trees) {
 		auto relpos = Common::Vector2(tree.Position.x - mypos.x, tree.Position.z - mypos.y);
-		auto timeToColl = relpos.dot(myvel) / (speed * speed);
-		auto minsep = relpos.length() - speed * timeToColl;
-		if(minsep > tree.Radius + 1.0f)
+		auto dist = relpos.length();
+		if(dist > tree.Radius + 5.0f)
 			continue;
 
-		if(timeToColl > 0 && timeToColl < minTime) {
-			minTime = timeToColl;
-			firstRelPos = relpos;
-		}
+		mAcceleration += Common::Vector3(-relpos.x, 0.0f, -relpos.y).normalized() * (tree.Radius + 5.0f - dist);
+		added = true;
 	}
 
-	if(minTime > 1.0f)
-		return;
-
-	addAcceleration(Common::Vector3(firstRelPos.x, 0.0f, firstRelPos.y) * -10.0f * (1.0f / minTime));
+	if(added)
+		maximiseAcceleration();
 }
 
 void Steering::turnTowards(float tgtyaw)
@@ -155,6 +141,12 @@ void Steering::addAcceleration(const Common::Vector3& acc)
 	mAcceleration += acc2;
 }
 
+void Steering::maximiseAcceleration()
+{
+	mAcceleration.normalize();
+	mAcceleration *= SoldierPhysics::RunAcceleration;
+}
+
 float Steering::accelLeft() const
 {
 	return SoldierPhysics::RunAcceleration - mAcceleration.length();
@@ -181,9 +173,9 @@ void AIActor::execute(const AITask& t)
 			{
 				mPhys->setAiming(false);
 				Steering st(mMap, mPhys);
+				st.seek(t.Vec);
 				st.avoidWalls();
 				st.avoidTrees();
-				st.seek(t.Vec);
 				st.lookWhereYoureGoing();
 				auto accel = st.getAcceleration();
 				AIStatic::Debug::drawLine(mID, "Moving",
@@ -216,7 +208,7 @@ void AIActor::execute(const AITask& t)
 				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f) + Random::clamped(Random::SourceAI) * mVariation;
 				auto diffpitch = -(currpitch - tgtpitch);
 
-				mPhys->addRotation(0.02f * diffyaw, 0.02f * diffpitch);
+				mPhys->addRotation(0.2f * diffyaw, 0.2f * diffpitch);
 				if(fabs(diffyaw) < mVariation * 0.2f + 0.05f && fabs(diffpitch) < mVariation * 0.2f + 0.05f) {
 					mShooter->shoot();
 				}
