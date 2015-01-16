@@ -321,6 +321,21 @@ AppDriver::AppDriver(const Constants& constants)
 
 bool AppDriver::handleKeyDown(float frameTime, SDLKey key)
 {
+	if(key == SDLK_MINUS || key == SDLK_KP_MINUS) {
+		auto ta = getTimeAcceleration();
+		if(ta > 1)
+			ta /= 2;
+		setTimeAcceleration(ta);
+		std::cout << "Time acceleration: " << ta << "\n";
+	}
+	if(key == SDLK_PLUS || key == SDLK_KP_PLUS) {
+		auto ta = getTimeAcceleration();
+		if(ta < 256)
+			ta *= 2;
+		setTimeAcceleration(ta);
+		std::cout << "Time acceleration: " << ta << "\n";
+	}
+
 	return mWorld.handleKeyDown(frameTime, key);
 }
 
