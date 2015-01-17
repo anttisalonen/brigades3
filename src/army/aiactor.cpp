@@ -108,6 +108,10 @@ void Steering::turnTowards(float tgtyaw)
 	auto currdir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation());
 	auto curryaw = atan2(currdir.z, currdir.x);
 	auto diffyaw = curryaw - tgtyaw;
+	if(diffyaw < -PI)
+		diffyaw += TWO_PI;
+	if(diffyaw > PI)
+		diffyaw -= TWO_PI;
 	mRotation += diffyaw;
 }
 
