@@ -3,6 +3,11 @@ share/rifle.wav:
 	Source: http://soundbible.com/1788-Sniper-Rifle.html
 	License: Public Domain
 
+share/DejaVuSans.ttf:
+	Author: See http://dejavu-fonts.org/wiki/index.php?title=Authors
+	Source: http://dejavu-fonts.org/
+	License: See http://dejavu-fonts.org/wiki/index.php?title=License
+
 All other files in the share directory:
 	Author: Antti Salonen
 	Source: Own work

@@ -1,6 +1,7 @@
 #include <iostream>
 #include <memory>
 #include <map>
+#include <sstream>
 
 #include <string.h>
 #include <stdlib.h>
@@ -69,6 +70,7 @@ class World {
 
 	private:
 		void setCameraForSoldier(unsigned int soldierIndex);
+		void updateUIMessages(float dt);
 
 		WorldMap mMap;
 		Soldiers mSoldiers;
@@ -81,6 +83,8 @@ class World {
 		PlayerInput mPlayerInput;
 		std::map<SDLKey, std::function<void (float)>> mControls;
 		Constants mConstants;
+		unsigned int mCurrentDied = 0;
+		Common::Countdown mDiedMessageTimer;
 };
 
 World::World(Scene::Scene& scene, const Constants& constants)
@@ -90,8 +94,10 @@ World::World(Scene::Scene& scene, const Constants& constants)
 	mScene(scene),
 	mObserverMode(constants.Observer),
 	mCamera(mScene.getDefaultCamera()),
-	mConstants(constants)
+	mConstants(constants),
+	mDiedMessageTimer(10.0f)
 {
+	mDiedMessageTimer.clear();
 	mControls[SDLK_w] = [&] (float p) { mCamera.setForwardMovement(p); };
 	mControls[SDLK_q] = [&] (float p) { mCamera.setUpwardsMovement(p); };
 	mControls[SDLK_d] = [&] (float p) { mCamera.setSidewaysMovement(p); };
@@ -124,6 +130,8 @@ void World::update(float dt)
 	auto hits = mBullets.checkForHits(mSoldiers.getHittables());
 	mSoldiers.processHits(hits);
 
+	updateUIMessages(dt);
+
 	if(mObserverMode) {
 		mScene.setOverlayEnabled("Sight", false);
 		if(mObservedSoldier == UINT_MAX) {
@@ -137,6 +145,28 @@ void World::update(float dt)
 		mScene.setFOV(mPlayerInput.getFOV());
 	}
 	Sound::setCamera(mCamera.getPosition(), mCamera.getTargetVector());
+}
+
+void World::updateUIMessages(float dt)
+{
+	std::stringstream msg;
+	unsigned int currentDied = 0;
+	for(const auto& h : mSoldiers.getHittables()) {
+		if(h.hasDied())
+			currentDied++;
+	}
+
+	mDiedMessageTimer.doCountdown(dt);
+	if(currentDied != mCurrentDied) {
+		mCurrentDied = currentDied;
+		msg << currentDied << " down, " << (mSoldiers.getNumSoldiers() - currentDied) << " to go!";
+		mScene.addOverlayText("DiedMessage", msg.str(), Common::Color::Red,
+				1.0f, 0.5f, 0.08f, true);
+		mDiedMessageTimer.rewind();
+		mScene.setOverlayDepth("DiedMessage", 1.0f);
+	} else if(mDiedMessageTimer.running() && mDiedMessageTimer.check()) {
+		mScene.setOverlayEnabled("DiedMessage", false);
+	}
 }
 
 void World::setCameraForSoldier(unsigned int soldierIndex)
@@ -313,6 +343,8 @@ AppDriver::AppDriver(const Constants& constants)
 
 	mScene.setZFar(1024.0f);
 	mScene.setClearColor(Common::Color(138, 163, 200));
+
+	mScene.enableText("share/DejaVuSans.ttf");
 
 	mWorld.init();
 	Sound::init();

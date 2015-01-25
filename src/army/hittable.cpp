@@ -22,8 +22,6 @@ bool HittableComponent::hit(const Ray& ray) const
 
 void HittableComponent::die()
 {
-	if(!mDied)
-		std::cout << "Died!\n";
 	mDied = true;
 }
 
