@@ -62,7 +62,7 @@ class World {
 	public:
 		World(Scene::Scene& scene, const Constants& constants);
 		void init();
-		void update(float dt);
+		bool update(float dt);
 		bool handleKeyDown(float frameTime, SDLKey key);
 		bool handleKeyUp(float frameTime, SDLKey key);
 		bool handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev);
@@ -71,6 +71,7 @@ class World {
 	private:
 		void setCameraForSoldier(unsigned int soldierIndex);
 		void updateUIMessages(float dt);
+		bool checkForWin(float dt);
 
 		WorldMap mMap;
 		Soldiers mSoldiers;
@@ -85,6 +86,7 @@ class World {
 		Constants mConstants;
 		unsigned int mCurrentDied = 0;
 		Common::Countdown mDiedMessageTimer;
+		Common::Countdown mEndRoundTimer;
 };
 
 World::World(Scene::Scene& scene, const Constants& constants)
@@ -95,7 +97,8 @@ World::World(Scene::Scene& scene, const Constants& constants)
 	mObserverMode(constants.Observer),
 	mCamera(mScene.getDefaultCamera()),
 	mConstants(constants),
-	mDiedMessageTimer(10.0f)
+	mDiedMessageTimer(10.0f),
+	mEndRoundTimer(10.0f)
 {
 	mDiedMessageTimer.clear();
 	mControls[SDLK_w] = [&] (float p) { mCamera.setForwardMovement(p); };
@@ -120,7 +123,7 @@ void World::init()
 	}
 }
 
-void World::update(float dt)
+bool World::update(float dt)
 {
 	mSoldiers.update(dt);
 	mPlayerInput.update(dt);
@@ -145,6 +148,11 @@ void World::update(float dt)
 		mScene.setFOV(mPlayerInput.getFOV());
 	}
 	Sound::setCamera(mCamera.getPosition(), mCamera.getTargetVector());
+
+	if(checkForWin(dt)) {
+		return true;
+	}
+	return false;
 }
 
 void World::updateUIMessages(float dt)
@@ -167,6 +175,32 @@ void World::updateUIMessages(float dt)
 	} else if(mDiedMessageTimer.running() && mDiedMessageTimer.check()) {
 		mScene.setOverlayEnabled("DiedMessage", false);
 	}
+}
+
+bool World::checkForWin(float dt)
+{
+	if(mCurrentDied >= mSoldiers.getNumSoldiers() - 1) {
+		std::stringstream msg;
+
+		if(mCurrentDied == mSoldiers.getNumSoldiers() - 1) {
+			for(unsigned int i = 0; i < mSoldiers.getNumSoldiers(); i++) {
+				if(!mSoldiers.getHittable(i)->hasDied()) {
+					msg << mSoldiers.getName(i) << " has won!";
+					std::cout << msg.str() << "\n";
+					mScene.addOverlayText("DiedMessage", msg.str(), Common::Color::Red,
+							1.0f, 0.5f, 0.08f, true);
+					mScene.setOverlayDepth("DiedMessage", 1.0f);
+					break;
+				}
+			}
+		}
+		mEndRoundTimer.doCountdown(dt);
+
+		if(mEndRoundTimer.check()) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void World::setCameraForSoldier(unsigned int soldierIndex)
@@ -388,9 +422,7 @@ bool AppDriver::handleMousePress(float frameTime, Uint8 button)
 
 bool AppDriver::prerenderUpdate(float frameTime)
 {
-	mWorld.update(frameTime);
-
-	return false;
+	return mWorld.update(frameTime);
 }
 
 void AppDriver::drawFrame()
