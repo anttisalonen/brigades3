@@ -24,8 +24,10 @@ void Bullets::update(float dt)
 		mHitters[i].update(dt);
 	}
 
-	for(unsigned int i = 0; i < mNumBullets; i++) {
-		mRenders[i].update(dt);
+	if(mScene) {
+		for(unsigned int i = 0; i < mNumBullets; i++) {
+			mRenders[i].update(dt);
+		}
 	}
 }
 
@@ -43,7 +45,8 @@ void Bullets::shoot(Weapon& weapon, const Common::Vector3& pos, const Common::Qu
 	ph->setVelocity(velvec * 700.0f);
 
 	mHitters[mNumBullets] = HitterComponent(ph, shooterID);
-	mRenders[mNumBullets] = BulletRenderer(mScene, &mHitters[mNumBullets], mNumBullets);
+	if(mScene)
+		mRenders[mNumBullets] = BulletRenderer(mScene, &mHitters[mNumBullets], mNumBullets);
 
 	mNumBullets++;
 	weapon.shoot();

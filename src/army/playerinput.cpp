@@ -3,9 +3,9 @@
 #include "playerinput.hpp"
 
 PlayerInput::PlayerInput(Soldiers* soldiers)
-	: mPhys(soldiers->getPlayerPhysics()),
-	mShooter(soldiers->getPlayerShooter()),
-	mHittable(soldiers->getPlayerHittable()),
+	: mPhys(soldiers ? soldiers->getPlayerPhysics() : nullptr),
+	mShooter(soldiers ? soldiers->getPlayerShooter() : nullptr),
+	mHittable(soldiers ? soldiers->getPlayerHittable() : nullptr),
 	mFOV(90.0f)
 {
 }

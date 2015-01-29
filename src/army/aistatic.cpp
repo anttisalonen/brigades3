@@ -40,6 +40,9 @@ void AIStatic::Debug::drawLine(const unsigned int id, const std::string& linenam
 	if(!mEnabled)
 		return;
 
+	if(!mScene)
+		return;
+
 	std::stringstream ss;
 	ss << id << " " << linename;
 	std::string lname = ss.str();

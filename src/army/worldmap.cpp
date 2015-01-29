@@ -47,7 +47,7 @@ Tree::Tree(const Common::Vector3& pos, float radius)
 {
 }
 
-WorldMap::WorldMap(Scene::Scene& scene)
+WorldMap::WorldMap(Scene::Scene* scene)
 	: mScene(scene)
 {
 }
@@ -95,15 +95,18 @@ void WorldMap::create()
 	addHouses();
 	addTrees();
 
-	auto hmapconv = getWidth() / 128.0f;
-	Heightmap hm(128, hmapconv, [&] (float x, float y) { return getHeightAt(x, y); });
-	mScene.addModelFromHeightmap("Terrain", hm);
-	auto mi = mScene.addMeshInstance("Terrain", "Terrain", "Snow");
+	if(mScene) {
+		auto hmapconv = getWidth() / 128.0f;
+		Heightmap hm(128, hmapconv, [&] (float x, float y) { return getHeightAt(x, y); });
 
-	mScene.addPlane("Sea", getWidth(), getWidth(), 16);
-	auto mi2 = mScene.addMeshInstance("Sea", "Sea", "Sea");
-	mi2->setPosition(Common::Vector3(-getWidth() / 2.0f, 0.0f, -getWidth() / 2.0f));
-	mi2->setScale(getWidth() * 2.0f, 1.0f, getWidth() * 2.0f);
+		mScene->addModelFromHeightmap("Terrain", hm);
+		auto mi = mScene->addMeshInstance("Terrain", "Terrain", "Snow");
+
+		mScene->addPlane("Sea", getWidth(), getWidth(), 16);
+		auto mi2 = mScene->addMeshInstance("Sea", "Sea", "Sea");
+		mi2->setPosition(Common::Vector3(-getWidth() / 2.0f, 0.0f, -getWidth() / 2.0f));
+		mi2->setScale(getWidth() * 2.0f, 1.0f, getWidth() * 2.0f);
+	}
 }
 
 Common::Vector3 WorldMap::pointToVec(float x, float y) const
@@ -167,18 +170,20 @@ void WorldMap::addHouses()
 		mHouses.push_back(house);
 	}
 
-	for(unsigned int i = 0; i < mHouses.size(); i++) {
-		std::stringstream ss;
-		ss << "House " << i << "\n";
-		std::string hname = ss.str();
-		auto vpair = mHouses[i].getVertexCoordsAndNormals();
-		auto texcoords = mHouses[i].getTexCoords();
-		auto indices = mHouses[i].getIndices();
-		mScene.addModel(hname, vpair.first, texcoords, indices, vpair.second);
-		auto mi = mScene.addMeshInstance(hname, hname, "House");
-		auto cp = mHouses[i].getCornerstonePosition();
-		std::cout << "Cornerstone at " << cp << "\n";
-		mi->setPosition(cp);
+	if(mScene) {
+		for(unsigned int i = 0; i < mHouses.size(); i++) {
+			std::stringstream ss;
+			ss << "House " << i << "\n";
+			std::string hname = ss.str();
+			auto vpair = mHouses[i].getVertexCoordsAndNormals();
+			auto texcoords = mHouses[i].getTexCoords();
+			auto indices = mHouses[i].getIndices();
+			mScene->addModel(hname, vpair.first, texcoords, indices, vpair.second);
+			auto mi = mScene->addMeshInstance(hname, hname, "House");
+			auto cp = mHouses[i].getCornerstonePosition();
+			std::cout << "Cornerstone at " << cp << "\n";
+			mi->setPosition(cp);
+		}
 	}
 }
 
@@ -192,13 +197,15 @@ void WorldMap::addTrees()
 			float rot = Random::uniform(Random::SourceWorld, 0.0f, QUARTER_PI);
 			mTrees.push_back(Tree(pos, r));
 
-			char name[256];
-			snprintf(name, 255, "Tree%d", i);
+			if(mScene) {
+				char name[256];
+				snprintf(name, 255, "Tree%d", i);
 
-			auto treeInst = mScene.addMeshInstance(name, "Tree", "Tree", false, true);
-			treeInst->setPosition(pos);
-			treeInst->setScale(r, r, r);
-			treeInst->setRotationFromEuler(Common::Vector3(0.0f, rot, 0.0f));
+				auto treeInst = mScene->addMeshInstance(name, "Tree", "Tree", false, true);
+				treeInst->setPosition(pos);
+				treeInst->setScale(r, r, r);
+				treeInst->setRotationFromEuler(Common::Vector3(0.0f, rot, 0.0f));
+			}
 		}
 	}
 }

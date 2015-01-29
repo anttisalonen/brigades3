@@ -31,7 +31,7 @@ struct Ray {
 
 class WorldMap {
 	public:
-		WorldMap(Scene::Scene& scene);
+		WorldMap(Scene::Scene* scene);
 		void create();
 		float getHeightAt(float x, float y) const;
 		std::vector<Tree> getTreesAt(float x, float y, float r) const;
@@ -54,7 +54,7 @@ class WorldMap {
 		bool nearHouse(float x, float y, float radius, House* house) const;
 		bool isFreeSpot(float x, float y) const;
 
-		Scene::Scene& mScene;
+		Scene::Scene* mScene;
 		std::vector<Tree> mTrees;
 
 		noise::module::Perlin mNoise;

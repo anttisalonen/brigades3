@@ -2,7 +2,7 @@
 
 #include "soldiers.hpp"
 
-RenderComponent::RenderComponent(Scene::Scene& scene,
+RenderComponent::RenderComponent(Scene::Scene* scene,
 		const SoldierPhysics* phys,
 		const HittableComponent* hit,
 		unsigned int num)
@@ -11,7 +11,7 @@ RenderComponent::RenderComponent(Scene::Scene& scene,
 {
 	char name[256];
 	snprintf(name, 255, "Soldier%d", num);
-	mMesh = scene.addMeshInstance(name, "Soldier", "Soldier").get();
+	mMesh = scene->addMeshInstance(name, "Soldier", "Soldier").get();
 }
 
 void RenderComponent::update(float dt)
@@ -26,10 +26,10 @@ void RenderComponent::update(float dt)
 	}
 }
 
-Soldiers::Soldiers(Scene::Scene& scene)
+Soldiers::Soldiers(Scene::Scene* scene, unsigned int playerSoldierIndex)
 	: mNumSoldiers(0),
 	mScene(scene),
-	mPlayerSoldierIndex(0)
+	mPlayerSoldierIndex(playerSoldierIndex)
 {
 	mPhysics.resize(MAX_SOLDIERS);
 	mRenders.resize(MAX_SOLDIERS);
@@ -43,17 +43,20 @@ void Soldiers::update(float dt)
 	for(unsigned int i = 0; i < mNumSoldiers; i++) {
 		mPhysics[i].update(dt);
 	}
+
 	for(unsigned int i = 0; i < mNumSoldiers; i++) {
 		mShooters[i].update(dt);
 	}
-	for(unsigned int i = 0; i < mNumSoldiers; i++) {
-		mRenders[i].update(dt);
+
+	if(mScene) {
+		for(unsigned int i = 0; i < mNumSoldiers; i++) {
+			mRenders[i].update(dt);
+		}
 	}
 }
 
 void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets, unsigned int numSoldiers)
 {
-	mPlayerSoldierIndex = 0;
 	for(unsigned int i = 0; i < numSoldiers; i++) {
 		mPhysics[i] = SoldierPhysics(wmap, 5.0f, 0.10f, 1.0f);
 		auto pos = wmap->findFreeSpot(100, Random::SourceGame);
@@ -63,7 +66,9 @@ void Soldiers::addSoldiers(const WorldMap* wmap, Bullets* bullets, unsigned int 
 		mPhysics[i].setPosition(pos);
 		mShooters[i] = ShooterComponent(&mPhysics[i], bullets, i);
 		mHittables[i] = HittableComponent(&mPhysics[i], 0.3f, 1.7f);
-		mRenders[i] = RenderComponent(mScene, &mPhysics[i], &mHittables[i], i);
+		if(mScene) {
+			mRenders[i] = RenderComponent(mScene, &mPhysics[i], &mHittables[i], i);
+		}
 
 		{
 			std::stringstream ss;

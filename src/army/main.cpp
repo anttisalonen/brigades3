@@ -56,6 +56,7 @@ struct Constants {
 	unsigned int AIRandomSeed = 0;
 	float DeterministicStep = 0;
 	bool Observer = false;
+	bool NoGUI = false;
 };
 
 class World {
@@ -72,13 +73,14 @@ class World {
 		void setCameraForSoldier(unsigned int soldierIndex);
 		void updateUIMessages(float dt);
 		bool checkForWin(float dt);
+		void showMessage(const std::string& msg);
 
 		WorldMap mMap;
 		Soldiers mSoldiers;
 		Bullets mBullets;
 		AI mAI;
 		Scene::Scene& mScene;
-		bool mObserverMode;
+		const bool mObserverMode;
 		unsigned int mObservedSoldier = UINT_MAX;
 		Scene::Camera& mCamera;
 		PlayerInput mPlayerInput;
@@ -87,12 +89,13 @@ class World {
 		unsigned int mCurrentDied = 0;
 		Common::Countdown mDiedMessageTimer;
 		Common::Countdown mEndRoundTimer;
+		bool mWinnerFound = false;
 };
 
 World::World(Scene::Scene& scene, const Constants& constants)
-	: mMap(scene),
-	mSoldiers(scene),
-	mBullets(&mMap, &scene),
+	: mMap(constants.NoGUI ? nullptr : &scene),
+	mSoldiers(constants.NoGUI ? nullptr : &scene, constants.Observer ? UINT_MAX : 0),
+	mBullets(&mMap, constants.NoGUI ? nullptr : &scene),
 	mScene(scene),
 	mObserverMode(constants.Observer),
 	mCamera(mScene.getDefaultCamera()),
@@ -113,8 +116,10 @@ void World::init()
 {
 	mMap.create();
 	mSoldiers.addSoldiers(&mMap, &mBullets, mConstants.NumSoldiers);
-	mPlayerInput = PlayerInput(&mSoldiers);
-	mAI = AI(&mMap, &mSoldiers, mConstants.AIConstants, &mScene);
+	if(!mObserverMode) {
+		mPlayerInput = PlayerInput(&mSoldiers);
+	}
+	mAI = AI(&mMap, &mSoldiers, mConstants.AIConstants, mConstants.NoGUI ? nullptr : &mScene);
 	mAI.init();
 
 	if(mObserverMode) {
@@ -126,7 +131,9 @@ void World::init()
 bool World::update(float dt)
 {
 	mSoldiers.update(dt);
-	mPlayerInput.update(dt);
+	if(!mObserverMode) {
+		mPlayerInput.update(dt);
+	}
 	mAI.update(dt);
 	mBullets.update(dt);
 
@@ -135,19 +142,21 @@ bool World::update(float dt)
 
 	updateUIMessages(dt);
 
-	if(mObserverMode) {
-		mScene.setOverlayEnabled("Sight", false);
-		if(mObservedSoldier == UINT_MAX) {
-			mCamera.applyMovementKeys(dt);
+	if(!mConstants.NoGUI) {
+		if(mObserverMode) {
+			mScene.setOverlayEnabled("Sight", false);
+			if(mObservedSoldier == UINT_MAX) {
+				mCamera.applyMovementKeys(dt);
+			} else {
+				setCameraForSoldier(mObservedSoldier);
+				mScene.setFOV(90.0f);
+			}
 		} else {
-			setCameraForSoldier(mObservedSoldier);
-			mScene.setFOV(90.0f);
+			setCameraForSoldier(mSoldiers.getPlayerSoldierIndex());
+			mScene.setFOV(mPlayerInput.getFOV());
 		}
-	} else {
-		setCameraForSoldier(mSoldiers.getPlayerSoldierIndex());
-		mScene.setFOV(mPlayerInput.getFOV());
+		Sound::setCamera(mCamera.getPosition(), mCamera.getTargetVector());
 	}
-	Sound::setCamera(mCamera.getPosition(), mCamera.getTargetVector());
 
 	if(checkForWin(dt)) {
 		return true;
@@ -168,12 +177,23 @@ void World::updateUIMessages(float dt)
 	if(currentDied != mCurrentDied) {
 		mCurrentDied = currentDied;
 		msg << currentDied << " down, " << (mSoldiers.getNumSoldiers() - currentDied) << " to go!";
-		mScene.addOverlayText("DiedMessage", msg.str(), Common::Color::Red,
-				1.0f, 0.5f, 0.08f, true);
+		showMessage(msg.str());
 		mDiedMessageTimer.rewind();
-		mScene.setOverlayDepth("DiedMessage", 1.0f);
 	} else if(mDiedMessageTimer.running() && mDiedMessageTimer.check()) {
-		mScene.setOverlayEnabled("DiedMessage", false);
+		if(!mConstants.NoGUI) {
+			mScene.setOverlayEnabled("DiedMessage", false);
+		}
+	}
+}
+
+void World::showMessage(const std::string& msg)
+{
+	if(!mConstants.NoGUI) {
+		mScene.addOverlayText("DiedMessage", msg, Common::Color::Red,
+				1.0f, 0.5f, 0.08f, true);
+		mScene.setOverlayDepth("DiedMessage", 1.0f);
+	} else {
+		std::cout << msg << "\n";
 	}
 }
 
@@ -182,14 +202,12 @@ bool World::checkForWin(float dt)
 	if(mCurrentDied >= mSoldiers.getNumSoldiers() - 1) {
 		std::stringstream msg;
 
-		if(mCurrentDied == mSoldiers.getNumSoldiers() - 1) {
+		if(!mWinnerFound && mCurrentDied == mSoldiers.getNumSoldiers() - 1) {
 			for(unsigned int i = 0; i < mSoldiers.getNumSoldiers(); i++) {
 				if(!mSoldiers.getHittable(i)->hasDied()) {
 					msg << mSoldiers.getName(i) << " has won!";
-					std::cout << msg.str() << "\n";
-					mScene.addOverlayText("DiedMessage", msg.str(), Common::Color::Red,
-							1.0f, 0.5f, 0.08f, true);
-					mScene.setOverlayDepth("DiedMessage", 1.0f);
+					showMessage(msg.str());
+					mWinnerFound = true;
 					break;
 				}
 			}
@@ -244,10 +262,6 @@ bool World::handleKeyDown(float frameTime, SDLKey key)
 			break;
 	}
 
-	if(key == SDLK_F1) {
-		mObserverMode = !mObserverMode;
-		return false;
-	}
 	if(key == SDLK_F2 && mObserverMode) {
 		if(mObservedSoldier == UINT_MAX) {
 			mObservedSoldier = 0;
@@ -273,11 +287,6 @@ bool World::handleKeyDown(float frameTime, SDLKey key)
 		std::cout << "Observed soldier: " << mObservedSoldier << "\n";
 		return false;
 	}
-	if(key == SDLK_F1) {
-		mObserverMode = !mObserverMode;
-		return false;
-	}
-
 
 	if(mObserverMode) {
 		auto it = mControls.find(key);
@@ -298,7 +307,11 @@ bool World::handleKeyDown(float frameTime, SDLKey key)
 		}
 		return false;
 	} else {
-		return mPlayerInput.handleKeyDown(frameTime, key);
+		if(!mObserverMode) {
+			return mPlayerInput.handleKeyDown(frameTime, key);
+		} else {
+			return false;
+		}
 	}
 }
 
@@ -311,7 +324,11 @@ bool World::handleKeyUp(float frameTime, SDLKey key)
 		}
 		return false;
 	} else {
-		return mPlayerInput.handleKeyUp(frameTime, key);
+		if(!mObserverMode) {
+			return mPlayerInput.handleKeyUp(frameTime, key);
+		} else {
+			return false;
+		}
 	}
 }
 
@@ -321,7 +338,11 @@ bool World::handleMouseMotion(float frameTime, const SDL_MouseMotionEvent& ev)
 		mCamera.rotate(-ev.xrel * 0.02f, -ev.yrel * 0.02f);
 		return false;
 	} else {
-		return mPlayerInput.handleMouseMotion(frameTime, ev);
+		if(!mObserverMode) {
+			return mPlayerInput.handleMouseMotion(frameTime, ev);
+		} else {
+			return false;
+		}
 	}
 }
 
@@ -335,7 +356,11 @@ bool World::handleMousePress(float frameTime, Uint8 button)
 	if(mObserverMode) {
 		return false;
 	} else {
-		return mPlayerInput.handleMousePress(frameTime, button);
+		if(!mObserverMode) {
+			return mPlayerInput.handleMousePress(frameTime, button);
+		} else {
+			return false;
+		}
 	}
 }
 
@@ -352,36 +377,43 @@ class AppDriver : public Common::Driver {
 	private:
 		Scene::Scene mScene;
 		World mWorld;
+		const Constants mConstants;
 };
 
 AppDriver::AppDriver(const Constants& constants)
-	: Common::Driver(800, 600, "Army"),
+	: Common::Driver(constants.NoGUI ? 0 : 800, constants.NoGUI ? 0 : 600, "Army"),
 	mScene(800, 600),
-	mWorld(mScene, constants)
+	mWorld(mScene, constants),
+	mConstants(constants)
 {
-	mScene.addModel("Soldier", "share/soldier.obj");
-	mScene.addModel("Tree", "share/tree.obj");
-	mScene.addTexture("Snow", "share/snow.jpg");
-	mScene.addTexture("Sea", "share/sea.jpg");
-	mScene.addTexture("House", "share/house.jpg");
-	mScene.addTexture("Soldier", "share/soldier.jpg");
-	mScene.addTexture("Tree", "share/tree.png");
-	mScene.addOverlay("Sight", "share/sight.png");
+	if(!mConstants.NoGUI) {
+		mScene.init();
+		mScene.addModel("Soldier", "share/soldier.obj");
+		mScene.addModel("Tree", "share/tree.obj");
+		mScene.addTexture("Snow", "share/snow.jpg");
+		mScene.addTexture("Sea", "share/sea.jpg");
+		mScene.addTexture("House", "share/house.jpg");
+		mScene.addTexture("Soldier", "share/soldier.jpg");
+		mScene.addTexture("Tree", "share/tree.png");
+		mScene.addOverlay("Sight", "share/sight.png");
 
-	mScene.getAmbientLight().setState(true);
-	mScene.getAmbientLight().setColor(Common::Color(127, 127, 127));
+		mScene.getAmbientLight().setState(true);
+		mScene.getAmbientLight().setColor(Common::Color(127, 127, 127));
 
-	mScene.getDirectionalLight().setState(true);
-	mScene.getDirectionalLight().setDirection(Common::Vector3(0.5f, -1.0f, 0.5f));
-	mScene.getDirectionalLight().setColor(Common::Vector3(0.9f, 0.9f, 0.9f));
+		mScene.getDirectionalLight().setState(true);
+		mScene.getDirectionalLight().setDirection(Common::Vector3(0.5f, -1.0f, 0.5f));
+		mScene.getDirectionalLight().setColor(Common::Vector3(0.9f, 0.9f, 0.9f));
 
-	mScene.setZFar(1024.0f);
-	mScene.setClearColor(Common::Color(138, 163, 200));
+		mScene.setZFar(1024.0f);
+		mScene.setClearColor(Common::Color(138, 163, 200));
 
-	mScene.enableText("share/DejaVuSans.ttf");
+		mScene.enableText("share/DejaVuSans.ttf");
+	}
 
 	mWorld.init();
-	Sound::init();
+	if(!mConstants.NoGUI) {
+		Sound::init();
+	}
 	WindowFocus::setWindowFocus(true);
 }
 
@@ -427,7 +459,9 @@ bool AppDriver::prerenderUpdate(float frameTime)
 
 void AppDriver::drawFrame()
 {
-	mScene.render();
+	if(!mConstants.NoGUI) {
+		mScene.render();
+	}
 }
 
 class App {
@@ -473,6 +507,9 @@ int main(int argc, char** argv)
 			c.Observer = true;
 		} else if(!strcmp(argv[i], "--aidebug")) {
 			c.AIConstants.AIDebug = true;
+		} else if(!strcmp(argv[i], "--nogui")) {
+			c.NoGUI = true;
+			c.Observer = true;
 		} else {
 			fprintf(stderr, "Unknown option \"%s\"\n", argv[i]);
 			return 1;

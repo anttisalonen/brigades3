@@ -12,7 +12,7 @@
 
 class RenderComponent {
 	public:
-		RenderComponent(Scene::Scene& scene,
+		RenderComponent(Scene::Scene* scene,
 				const SoldierPhysics* phys,
 				const HittableComponent* hit,
 				unsigned int num);
@@ -27,7 +27,7 @@ class RenderComponent {
 
 class Soldiers {
 	public:
-		Soldiers(Scene::Scene& scene);
+		Soldiers(Scene::Scene* scene, unsigned int playerSoldierIndex);
 		void update(float dt);
 		void addSoldiers(const WorldMap* wmap, Bullets* bullets, unsigned int numSoldiers);
 		const Common::Vector3& getPlayerSoldierPosition() const;
@@ -61,7 +61,7 @@ class Soldiers {
 		std::vector<HittableComponent> mHittables;
 		std::vector<std::string> mSoldierNames;
 
-		Scene::Scene& mScene;
+		Scene::Scene* mScene;
 		unsigned int mPlayerSoldierIndex;
 };
 
