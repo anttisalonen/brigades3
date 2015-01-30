@@ -90,6 +90,7 @@ class World {
 		Common::Countdown mDiedMessageTimer;
 		Common::Countdown mEndRoundTimer;
 		bool mWinnerFound = false;
+		float mCurrentTime = 0.0f;
 };
 
 World::World(Scene::Scene& scene, const Constants& constants)
@@ -130,6 +131,9 @@ void World::init()
 
 bool World::update(float dt)
 {
+	assert(dt >= 0.0f);
+	mCurrentTime += dt;
+
 	mSoldiers.update(dt);
 	if(!mObserverMode) {
 		mPlayerInput.update(dt);
@@ -193,7 +197,7 @@ void World::showMessage(const std::string& msg)
 				1.0f, 0.5f, 0.08f, true);
 		mScene.setOverlayDepth("DiedMessage", 1.0f);
 	} else {
-		std::cout << msg << "\n";
+		std::cout << "[" << mCurrentTime << "] " << msg << "\n";
 	}
 }
 
