@@ -3,7 +3,8 @@
 
 AIPlanner::AIPlanner(const WorldMap* wmap, const SoldierPhysics* phys)
 	: mMap(wmap),
-	mPhys(phys)
+	mPhys(phys),
+	mTimer(0.2f, Random::uniform(Random::SourceAI))
 {
 }
 
@@ -42,15 +43,14 @@ void AIPlanner::updateTask(const AISensor& sensor)
 	}
 }
 
-AITask AIPlanner::getNextTask(const AISensor& sensor)
-{
-	updateTask(sensor);
-	return mCurrTask;
-}
-
-void AIPlanner::update(float dt)
+AITask AIPlanner::update(float dt, const AISensor& sensor)
 {
 	mCurrTask.ElapsedTime += dt;
+	if(!mTimer.check(dt)) {
+		updateTask(sensor);
+	}
+
+	return mCurrTask;
 }
 
 

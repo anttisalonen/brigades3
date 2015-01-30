@@ -24,14 +24,15 @@ class AIPlanner {
 	public:
 		AIPlanner() = default;
 		AIPlanner(const WorldMap* wmap, const SoldierPhysics* phys);
-		AITask getNextTask(const AISensor& sensor);
-		void updateTask(const AISensor& sensor);
-		void update(float dt);
+		AITask update(float dt, const AISensor& sensor);
 
 	private:
+		void updateTask(const AISensor& sensor);
+
 		const WorldMap* mMap;
 		const SoldierPhysics* mPhys;
 		AITask mCurrTask;
+		Common::SteadyTimer mTimer = Common::SteadyTimer(0.2f);
 };
 
 #endif
