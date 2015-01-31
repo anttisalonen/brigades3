@@ -28,6 +28,7 @@ class AIPlanner {
 
 	private:
 		void updateTask(const AISensor& sensor);
+		AITask attackEnemy(std::vector<SoldierKnowledge>& enemies);
 
 		const WorldMap* mMap;
 		const SoldierPhysics* mPhys;

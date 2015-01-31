@@ -3,10 +3,11 @@
 #include "aisensor.hpp"
 #include "random.hpp"
 
-SoldierKnowledge::SoldierKnowledge(unsigned int id, const Common::Vector3& pos)
-	: mLastKnownPosition(pos),
-	mCurrentlySeen(true),
-	mID(id)
+SoldierKnowledge::SoldierKnowledge(unsigned int id, const Common::Vector3& knownpos, bool currentlyseen, float currtime)
+	: mLastKnownPosition(knownpos),
+	mCurrentlySeen(currentlyseen),
+	mID(id),
+	mEntryTime(currtime)
 {
 }
 
@@ -24,20 +25,52 @@ AISensor::AISensor(const WorldMap* wmap, const Soldiers* soldiers, unsigned int 
 {
 }
 
+bool AISensor::canSeeEnemy(unsigned int id)
+{
+	if(id == mID)
+		return false;
+
+	if(!LOSNotBlocked(id))
+		return false;
+
+	const auto& othpos = mSoldiers->getSoldierPosition(id);
+	const auto& mypos = mPhys->getPosition();
+	Common::Vector3 posdiff = othpos - mypos;
+	auto mydir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation());
+	auto ang = Common::Vector2(posdiff.x, posdiff.z).angleTo(Common::Vector2(mydir.x, mydir.z));
+
+	return ang < QUARTER_PI;
+}
+
 void AISensor::update(float dt)
 {
-	if(mTimer.check(dt)) {
-		mSensedSoldiers.clear();
-		auto& mypos = mPhys->getPosition();
-		auto mydir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation());
-		for(auto& s : mSoldiers->getSoldiersAt(mypos, 100.0f)) {
-			if(s != mID && canSee(s) && mSoldiers->soldierIsAlive(s)) {
-				auto& othpos = mSoldiers->getSoldierPosition(s);
-				Common::Vector3 posdiff = othpos - mypos;
-				auto ang = Common::Vector2(posdiff.x, posdiff.z).angleTo(Common::Vector2(mydir.x, mydir.z));
-				if(ang < QUARTER_PI) {
-					mSensedSoldiers.push_back(SoldierKnowledge(s, othpos));
-				}
+	mCurrTime += dt;
+
+	if(!mTimer.check(dt))
+		return;
+
+	auto oldSensed = mSensedSoldiers;
+	mSensedSoldiers.clear();
+
+	static const float MemorySpan = 10.0f; // seconds
+	static const float EnemyLostRange = 5.0f; // forget enemy if he's not seen
+	for(const auto& s : oldSensed) {
+		if(!canSeeEnemy(s.first)) {
+			if(s.second.timeSinceEntry(mCurrTime) < MemorySpan &&
+					s.second.getPosition().distance(mPhys->getPosition()) > EnemyLostRange) {
+				mSensedSoldiers.insert({s.first,
+						SoldierKnowledge(s.second.getID(), s.second.getPosition(), false, s.second.entryTime())});
+			}
+		}
+	}
+
+	static const float VisibilityRange = 200.0f;
+	for(auto& s : mSoldiers->getSoldiersAt(mPhys->getPosition(), VisibilityRange)) {
+		if(canSeeEnemy(s)) {
+			if(mSoldiers->soldierIsAlive(s)) {
+				mSensedSoldiers.insert({s, SoldierKnowledge(s, mSoldiers->getSoldierPosition(s), true, mCurrTime)});
+			} else {
+				mSensedSoldiers.erase(s);
 			}
 		}
 	}
@@ -47,13 +80,22 @@ std::vector<SoldierKnowledge> AISensor::getCurrentlySeenEnemies() const
 {
 	std::vector<SoldierKnowledge> ret;
 	for(const auto& s : mSensedSoldiers) {
-		if(s.isCurrentlySeen())
-			ret.push_back(s);
+		if(s.second.isCurrentlySeen())
+			ret.push_back(s.second);
 	}
 	return ret;
 }
 
-bool AISensor::canSee(unsigned int id) const
+std::vector<SoldierKnowledge> AISensor::getEnemyEntries() const
+{
+	std::vector<SoldierKnowledge> ret;
+	for(const auto& s : mSensedSoldiers) {
+		ret.push_back(s.second);
+	}
+	return ret;
+}
+
+bool AISensor::LOSNotBlocked(unsigned int id) const
 {
 	// TODO: take trees into account
 	auto sightpos = mPhys->getPosition() + Common::Vector3(0.0f, 1.7f, 0.0f);
