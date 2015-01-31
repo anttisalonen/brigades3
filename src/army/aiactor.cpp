@@ -203,16 +203,16 @@ void AIActor::execute(const AITask& t)
 				auto tgtvec = t.Vec - mPhys->getPosition();
 				auto tgtyaw = atan2(tgtvec.z, tgtvec.x);
 				Steering st(mMap, mPhys);
-				st.turnTowards(tgtyaw + Random::clamped(Random::SourceAI) * mVariation);
+				st.turnTowards(tgtyaw);
 				auto diffyaw = st.getRotation();
 
 				// pitch
 				auto currdir = Common::Math::rotate3D(Scene::WorldForward, mPhys->getOrientation() * mPhys->getAimPitch());
 				auto currpitch = atan2(currdir.y, 1.0f);
-				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f) + Random::clamped(Random::SourceAI) * mVariation;
+				auto tgtpitch = atan2(tgtvec.normalized().y, 1.0f);
 				auto diffpitch = -(currpitch - tgtpitch);
 
-				mPhys->addRotation(0.2f * diffyaw, 0.2f * diffpitch);
+				mPhys->addRotation(0.5f * (mVariation + 0.5f) * diffyaw, 0.5f * (mVariation + 0.5f) * diffpitch);
 				if(fabs(diffyaw) < mVariation * 0.2f + 0.05f && fabs(diffpitch) < mVariation * 0.2f + 0.05f) {
 					mShooter->shoot();
 				}
