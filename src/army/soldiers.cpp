@@ -142,6 +142,11 @@ const Common::Vector3& Soldiers::getSoldierPosition(unsigned int id) const
 	return getPhys(id)->getPosition();
 }
 
+const Common::Vector3& Soldiers::getSoldierVelocity(unsigned int id) const
+{
+	return getPhys(id)->getVelocity();
+}
+
 ShooterComponent* Soldiers::getShooter(unsigned int i)
 {
 	assert(i < mNumSoldiers);

@@ -41,6 +41,7 @@ class Soldiers {
 		SoldierPhysics* getPhys(unsigned int i);
 		const SoldierPhysics* getPhys(unsigned int i) const;
 		const Common::Vector3& getSoldierPosition(unsigned int id) const;
+		const Common::Vector3& getSoldierVelocity(unsigned int id) const;
 		ShooterComponent* getShooter(unsigned int i);
 		HittableComponent* getHittable(unsigned int i);
 		std::vector<HittableComponent> getHittables() const;

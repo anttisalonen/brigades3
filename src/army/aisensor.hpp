@@ -12,18 +12,23 @@
 
 class SoldierKnowledge {
 	public:
-		SoldierKnowledge(unsigned int id, const Common::Vector3& knownpos, bool currentlyseen, float currtime);
-		float timeSinceEntry(float currtime) const { return currtime - mEntryTime; }
+		SoldierKnowledge(unsigned int id, const Common::Vector3& knownpos,
+				const Common::Vector3& knownvel, bool currentlyseen,
+				float entrytime, float currtime);
+		float timeSinceEntry() const { return mCurrTime - mEntryTime; }
 		bool isCurrentlySeen() const { return mCurrentlySeen; }
 		float entryTime() const { return mEntryTime; }
 		const Common::Vector3& getPosition() const { return mLastKnownPosition; }
+		const Common::Vector3& getVelocity() const { return mLastKnownVelocity; }
 		unsigned int getID() const { return mID; }
 
 	private:
 		Common::Vector3 mLastKnownPosition;
+		Common::Vector3 mLastKnownVelocity;
 		bool mCurrentlySeen;
 		unsigned int mID;
 		float mEntryTime;
+		float mCurrTime;
 };
 
 class AISensor {

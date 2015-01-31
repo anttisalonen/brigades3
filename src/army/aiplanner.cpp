@@ -18,6 +18,12 @@ AITask AIPlanner::attackEnemy(std::vector<SoldierKnowledge>& enemies)
 	AITask t;
 
 	t.Vec = enemies[0].getPosition();
+
+	// look ahead
+	if(!enemies[0].isCurrentlySeen()) {
+		t.Vec += enemies[0].getVelocity() * enemies[0].timeSinceEntry();
+	}
+
 	if(enemies[0].isCurrentlySeen() && mypos.distance(t.Vec) < 100.0f) {
 		t.Type = AITask::Type::Shoot;
 	} else {

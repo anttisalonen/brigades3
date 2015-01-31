@@ -3,11 +3,15 @@
 #include "aisensor.hpp"
 #include "random.hpp"
 
-SoldierKnowledge::SoldierKnowledge(unsigned int id, const Common::Vector3& knownpos, bool currentlyseen, float currtime)
+SoldierKnowledge::SoldierKnowledge(unsigned int id, const Common::Vector3& knownpos,
+		const Common::Vector3& knownvel, bool currentlyseen, float entrytime,
+		float currtime)
 	: mLastKnownPosition(knownpos),
+	mLastKnownVelocity(knownvel),
 	mCurrentlySeen(currentlyseen),
 	mID(id),
-	mEntryTime(currtime)
+	mEntryTime(entrytime),
+	mCurrTime(currtime)
 {
 }
 
@@ -56,10 +60,11 @@ void AISensor::update(float dt)
 	static const float EnemyLostRange = 5.0f; // forget enemy if he's not seen
 	for(const auto& s : oldSensed) {
 		if(!canSeeEnemy(s.first)) {
-			if(s.second.timeSinceEntry(mCurrTime) < MemorySpan &&
+			if(s.second.timeSinceEntry() < MemorySpan &&
 					s.second.getPosition().distance(mPhys->getPosition()) > EnemyLostRange) {
 				mSensedSoldiers.insert({s.first,
-						SoldierKnowledge(s.second.getID(), s.second.getPosition(), false, s.second.entryTime())});
+						SoldierKnowledge(s.second.getID(), s.second.getPosition(),
+								s.second.getVelocity(), false, s.second.entryTime(), mCurrTime)});
 			}
 		}
 	}
@@ -68,7 +73,9 @@ void AISensor::update(float dt)
 	for(auto& s : mSoldiers->getSoldiersAt(mPhys->getPosition(), VisibilityRange)) {
 		if(canSeeEnemy(s)) {
 			if(mSoldiers->soldierIsAlive(s)) {
-				mSensedSoldiers.insert({s, SoldierKnowledge(s, mSoldiers->getSoldierPosition(s), true, mCurrTime)});
+				mSensedSoldiers.insert({s, SoldierKnowledge(s, mSoldiers->getSoldierPosition(s),
+							mSoldiers->getSoldierVelocity(s),
+							true, mCurrTime, mCurrTime)});
 			} else {
 				mSensedSoldiers.erase(s);
 			}
