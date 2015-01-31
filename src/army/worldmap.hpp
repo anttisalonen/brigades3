@@ -18,7 +18,7 @@ struct Tree {
 	Common::Vector3 Position;
 	float Radius;
 	static constexpr float UNPASSABLE_COEFFICIENT   = 0.6f;
-	static constexpr float UNSEETHROUGH_COEFFICIENT = 0.9f;
+	static constexpr float UNSEETHROUGH_COEFFICIENT = 0.7f;
 	static constexpr float TRUNK_COEFFICIENT        = 0.1f;
 	static constexpr float HEIGHT_COEFFICIENT       = 2.0f;
 	static constexpr float BULLET_SLOWDOWN_PER_TREE_METER = 1000.0f;
